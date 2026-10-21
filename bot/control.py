@@ -25,6 +25,7 @@ def _atomic_write(path: Path, data: dict) -> None:
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp_")
     with os.fdopen(fd, "w") as f:
         json.dump(data, f, indent=2, default=str)
+    os.chmod(tmp, 0o644)        # mkstemp makes 0600; let a read-only analyst user read status.json
     os.replace(tmp, path)
 
 
