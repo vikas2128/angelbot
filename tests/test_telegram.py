@@ -130,16 +130,24 @@ def _journal(path):
     return j
 
 
+def _pin_today(monkeypatch, day="2026-10-22"):
+    monkeypatch.setattr("bot.telegram_ctl.now_ist", lambda: datetime.fromisoformat(f"{day} 12:00").replace(tzinfo=IST))
+
+
 def test_report_file_built_from_journal(tmp_path, monkeypatch):
     monkeypatch.setattr(control, "JOURNAL", tmp_path / "j.db")
+    _pin_today(monkeypatch)
     _journal(tmp_path / "j.db")
     out = tmp_path / "out"; out.mkdir()
     path, caption = build_report_file("", out)
-    assert path.exists() and "AngelBot report" in path.read_text()
-    assert "2 trades" in caption and "Net" in caption and "Under 100 trades" in caption and "TEST" in caption
-    path2, caption2 = build_report_file("session 2026-10-22", out)          # only the real-session day
-    assert "1 trade " in caption2 and "1 trades" not in caption2
-    assert "2026-10-22 to 2026-10-22" in caption2
+    page = path.read_text()
+    assert path.name == "angelbot-report-2026-10-22.html" and 'id="today"' in page and 'id="month"' in page
+    assert "Today</b>: 1 trade," in caption and "October 2026</b>: 2 trades" in caption
+    assert "Under 100 trades" in caption and "TEST" in caption and "Tabs: Today and Month" in caption
+    path2, caption2 = build_report_file("session 2026-10-22", out)          # month tab restarts on the date given
+    assert "Since Oct 22</b>: 1 trade," in caption2
+    path3, caption3 = build_report_file("replay", out)
+    assert "Today</b>: no closed trades yet" in caption3                    # the 22nd's trade is a real session
 
 
 def test_report_errors_are_friendly(tmp_path, monkeypatch):
@@ -151,6 +159,7 @@ def test_report_errors_are_friendly(tmp_path, monkeypatch):
     _journal(tmp_path / "j.db")
     with pytest.raises(ValueError, match="Unknown option"):
         build_report_file("banana", out)
+    _pin_today(monkeypatch)
     with pytest.raises(ValueError, match="No closed trades"):
         build_report_file("2030-01-01", out)
 

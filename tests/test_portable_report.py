@@ -56,10 +56,28 @@ def test_basis_and_story():
     assert any("Fewer than 100 trades" in s for s in d["story"]["insights"])
 
 
+TODAY = "2026-10-21"
+ROWS2 = ROWS + [row("2026-10-05T10:00:00+05:30", 2.0, 2.2, "target"), row("2026-09-30T10:00:00+05:30", -1.0, 2.2)]
+
+
+def _text(page: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"<script.*?</script>|<style.*?</style>", "", page, flags=re.S)))
+
+
+def test_build_all_splits_today_and_month():
+    d = br.build_all(ROWS2, "1-minute", TODAY)
+    assert d["today_label"] == "Wed 21 Oct" and d["month_label"] == "October 2026" and d["month_first"] == "2026-10-01"
+    assert d["day"]["kpis"]["trades"] == 1                      # only the 21st
+    assert d["month"]["kpis"]["trades"] == 4                    # 20th x2, 21st, and 5 Oct; September is excluded
+    assert br.build_all(ROWS2, "1-minute", "2026-10-25")["day"] is None        # nothing closed today
+    since = br.build_all(ROWS2, "1-minute", TODAY, since="2026-09-28")
+    assert since["month"]["kpis"]["trades"] == 5 and since["month_label"] == "Since Sep 28"
+
+
 def test_render_is_standalone_and_script_safe(tmp_path):
-    evil = [row("2026-10-20T10:00:00+05:30", 1.0, 2.2, reason="</script><b>x")]
+    evil = [row("2026-10-21T10:00:00+05:30", 1.0, 2.2, reason="</script><b>x")]
     out = tmp_path / "r.html"
-    br.render(br.build(evil, "1-minute", None), out)
+    br.render(br.build_all(evil, "1-minute", TODAY), out)
     page = out.read_text()
     assert "<!--@" not in page                              # every placeholder was filled
     assert "</script><b>" not in page                       # data cannot close the script tag
@@ -67,20 +85,41 @@ def test_render_is_standalone_and_script_safe(tmp_path):
     urls = set(re.findall(r"https?://[^\"' )]+", page))
     assert urls <= {"http://www.w3.org/2000/svg"}           # no network resources, SVG namespace only
     payload = page.split('id="report-data">', 1)[1].split("</script>", 1)[0]
-    assert json.loads(payload)["by_reason"][0]["reason"] == "</script><b>x"
+    assert json.loads(payload)["month"]["by_reason"][0]["reason"] == "</script><b>x"
 
 
-def test_report_shows_its_data_without_javascript(tmp_path):
-    """Phone file previews and mail clients do not run scripts: the figures must already be in the HTML."""
+def test_both_tabs_show_their_data_without_javascript(tmp_path):
+    """Phone file previews and mail clients do not run scripts: both tabs' figures must be in the HTML."""
     out = tmp_path / "r.html"
-    br.render(br.build(ROWS, "1-minute", [{"item": "Bot process", "state": "ok", "detail": "Running"}]), out)
+    status = {"written_at": "2026-10-21T10:00:00+05:30", "bot_alive": True, "mode": "paper", "positions": []}
+    br.render(br.build_all(ROWS2, "1-minute", TODAY, status=status), out)
     page = out.read_text()
-    assert re.findall(r"<script[^>]*>", page) == ['<script type="application/json" id="report-data">']
-    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"<script.*?</script>|<style.*?</style>", "", page, flags=re.S)))
-    for needle in ("\u2212\u20b95.80", "Win rate", "33.3%", "Goal reached", "Safety exit (stop loss)",
-                   "Bot process", "Fewer than 100 trades", "Oct 20 to Oct 21"):
+    scripts = re.findall(r"<script[^>]*>", page)
+    assert scripts[0] == '<script type="application/json" id="report-data">' and len(scripts) == 2   # data + tab switcher
+    assert 'id="today"' in page and 'id="month"' in page and "hidden" in page.split("<nav", 1)[1].split(">", 1)[0]
+    text = _text(page)
+    for needle in ("Today \u00b7 Wed 21 Oct", "Month \u00b7 October 2026", "Trades today", "How trades ended",
+                   "Right now", "Bot process", "Goal reached", "Safety exit (stop loss)", "Fewer than 100 trades"):
         assert needle in text, needle
-    assert page.count('class="ln"') == 1 and "<path" in page and page.count("<rect") >= 2   # charts are drawn
+    assert page.count('class="ln"') == 2 and "<path" in page and page.count("<rect") >= 2   # both charts drawn
+
+
+def test_empty_today_still_renders(tmp_path):
+    out = tmp_path / "r.html"
+    br.render(br.build_all(ROWS2, "1-minute", "2026-10-25"), out)
+    text = _text(out.read_text())
+    assert "No closed trades today yet" in text and "Month \u00b7 October 2026" in text and "How trades ended" in text
+
+
+def test_right_now_from_a_raw_status_file():
+    st = {"written_at": "2020-01-01T10:00:00+05:30", "state": "stopped", "mode": "live", "replay": True,
+          "positions": [{"symbol": "SBIN-EQ", "qty": 1, "avg": 800, "ltp": 801, "unrealized": 1}],
+          "halted_reason": "max_daily_loss", "cooldown_until": "2026-10-21T15:38:05+05:30", "control": {"paused": True}}
+    rows = {r["item"]: r for r in br.right_now(st)}
+    assert rows["Bot process"]["state"] == "off" and rows["Trading mode"]["state"] == "warn"
+    assert "replay" in rows["Last status"]["detail"] and "Open: SBIN-EQ" in rows
+    assert rows["Resting after losses"]["detail"] == "Until 15:38" and rows["New trades"]["detail"] == "Paused"
+    assert br.right_now({}) is None and br.right_now(None) is None
 
 
 def test_indian_grouping_and_signs():

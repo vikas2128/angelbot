@@ -115,7 +115,7 @@ def build_report_file(arg: str, out_dir: Path) -> tuple[Path, str]:
 
     Raises ValueError with a message that is safe to show the user when there is nothing to report.
     """
-    source, since = "all", "0000-00-00"
+    source, since = "all", None
     for word in (arg or "").split():
         if word in ("all", "session", "replay"):
             source = word
@@ -128,39 +128,42 @@ def build_report_file(arg: str, out_dir: Path) -> tuple[Path, str]:
     if not REPORT_SKILL.exists():
         raise ValueError("Report builder not found on this machine (skills/angelbot-report).")
     br = _load_report_builder()
+    today = now_ist().strftime("%Y-%m-%d")
+    first, _ = br.period(today, since)               # the Month tab starts on the 1st, or on the date given
     try:
-        rows = br.load_rows(SimpleNamespace(db=str(control.JOURNAL), json=None, since=since,
+        rows = br.load_rows(SimpleNamespace(db=str(control.JOURNAL), json=None, since=first,
                                             until="9999-99-99", source=source))
     except SystemExit as e:                        # the builder exits with a message on bad input
         raise ValueError(str(e)) from None
     if not rows:
-        raise ValueError("No closed trades match that filter yet.")
+        raise ValueError(f"No closed trades from {first} on that filter yet.")
     try:
         timeframe = f"{C.load_config()['strategy'].get('timeframe_min', 1)}-minute"
     except Exception:
         timeframe = "1-minute"
-    st = control.read_status()
-    setup = [{"item": "Bot process", "state": "ok" if st.get("bot_alive") else "off",
-              "detail": "Running" if st.get("bot_alive") else "Not running right now"},
-             {"item": "Trading mode", "state": "warn" if st.get("mode") == "live" else "ok",
-              "detail": str(st.get("mode") or "unknown")}] if st.get("written_at") else None
-    data = br.build(rows, timeframe, setup)
-    out = out_dir / f"angelbot-report-{now_ist():%Y-%m-%d}.html"
+    data = br.build_all(rows, timeframe, today, since, None, control.read_status())
+    out = out_dir / f"angelbot-report-{today}.html"
     br.render(data, out)
-    k, m = data["kpis"], data["meta"]
-    pf = "n/a" if k["profit_factor"] is None else f"{k['profit_factor']:.2f}"
+    day, mo = data["day"], data["month"]
+    ref = mo or day
+    pf = lambda k: "n/a" if k["profit_factor"] is None else f"{k['profit_factor']:.2f}"
+    today_line = ("no closed trades yet" if day is None else
+                  f"{day['kpis']['trades']} trade{'' if day['kpis']['trades'] == 1 else 's'}, "
+                  f"net <b>{M.money(day['kpis']['net'])}</b>")
+    k = mo["kpis"]
     notes = []
-    if m["basis"] != "session":
-        notes.append("Includes replayed candles, not only live sessions." if m["basis"] == "mixed"
+    if ref["meta"]["basis"] != "session":
+        notes.append("Includes replayed candles, not only live sessions." if ref["meta"]["basis"] == "mixed"
                      else "Replayed candles, not a live session.")
     if k["trades"] < 100:
         notes.append("Under 100 trades: too few to judge a strategy.")
-    caption = (f"📄 <b>AngelBot report</b> · {k['trades']} trade{'' if k['trades'] == 1 else 's'}"
-               f" · {m['first_day']} to {m['last_day']}\n"
-               f"{M.mode_tag('live' if 'live' in m['mode'] else 'paper')}\n"
-               f"Net <b>{M.money(k['net'])}</b> after fees · win rate {k['win_rate'] * 100:.1f}% · "
-               f"profit factor {pf} · max drawdown {M.money(k['max_dd'])}\n"
-               + " ".join(notes) + "\nOpen the file in your phone's browser.")
+    caption = (f"📄 <b>AngelBot report</b> · {data['today_label']}\n"
+               f"{M.mode_tag('live' if 'live' in ref['meta']['mode'] else 'paper')}\n"
+               f"<b>Today</b>: {today_line}\n"
+               f"<b>{html.escape(data['month_label'])}</b>: {k['trades']} trade{'' if k['trades'] == 1 else 's'}, "
+               f"net <b>{M.money(k['net'])}</b> after fees · win rate {k['win_rate'] * 100:.1f}% · "
+               f"profit factor {pf(k)} · max drawdown {M.money(k['max_dd'])}\n"
+               + " ".join(notes) + "\nOpen the file in your phone's browser. Tabs: Today and Month.")
     return out, caption.strip()
 
 
