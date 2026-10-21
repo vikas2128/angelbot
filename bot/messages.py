@@ -54,10 +54,8 @@ def shares(n) -> str:
 
 def mode_tag(mode) -> str:
     if mode == "live":
-        return "💰 <b>LIVE</b> (real money)"
-    if mode == "paper":
-        return "🧪 Practice mode (no real money)"
-    return esc(str(mode or "unknown mode"))
+        return "🔴 <b>LIVE</b> (real money)"
+    return "🧪 <b>TEST</b> (paper trading, no real money)"
 
 
 def exit_reason(reason: str | None) -> str:
@@ -77,6 +75,14 @@ def strategy_name(name: str | None) -> str:
     return STRATEGIES.get(name or "", esc(name or "strategy"))
 
 
+def stamp(ts) -> str:
+    """Trade time as 21 Oct, 10:05:32 IST (empty if unknown)."""
+    try:
+        return ts.strftime("%d %b, %H:%M:%S") + " IST"
+    except AttributeError:
+        return ""
+
+
 def _day(day: str) -> str:
     try:
         return datetime.strptime(day, "%Y-%m-%d").strftime("%d %b %Y")
@@ -91,10 +97,12 @@ def started(mode, strategy, symbols) -> str:
             f"Watching: {esc(', '.join(symbols))}")
 
 
-def opened(symbol, side, qty, px, stop, target, strategy, mode) -> str:
+def opened(symbol, side, qty, px, stop, target, strategy, mode, ts=None) -> str:
     verb = "Bought" if side == "LONG" else "Sold (short)"
     lines = [f"🟢 <b>{verb} {esc(symbol)}</b>",
              f"{shares(qty)} at {price(px)}"]
+    if stamp(ts):
+        lines.append(f"🕐 {stamp(ts)}")
     exits = []
     if stop:
         exits.append(f"Safety exit: {price(stop)}")
@@ -103,12 +111,11 @@ def opened(symbol, side, qty, px, stop, target, strategy, mode) -> str:
     if exits:
         lines.append("   ".join(exits))
     lines.append(f"Why: {strategy_name(strategy)} signal")
-    if mode != "live":
-        lines.append("🧪 Practice")
     return "\n".join(lines)
 
 
-def closed(symbol, side, qty, entry, exit_px, gross, charges, net, reason, mode) -> str:
+def closed(symbol, side, qty, entry, exit_px, gross, charges, net, reason, mode,
+           entry_ts=None, exit_ts=None) -> str:
     won = net > 0
     head = "✅ <b>Closed {} with a profit</b>" if won else "🔻 <b>Closed {} with a loss</b>"
     if net == 0:
@@ -119,8 +126,10 @@ def closed(symbol, side, qty, entry, exit_px, gross, charges, net, reason, mode)
              f"{'Sold' if side == 'LONG' else 'Bought back'} {price(exit_px)} · {shares(qty)}",
              f"Fees: {price(charges)}",
              f"Reason: {exit_reason(reason)}"]
-    if mode != "live":
-        lines.append("🧪 Practice")
+    if stamp(entry_ts) and stamp(exit_ts):
+        lines.append(f"🕐 In {stamp(entry_ts)}\n🕐 Out {stamp(exit_ts)}")
+    elif stamp(exit_ts):
+        lines.append(f"🕐 {stamp(exit_ts)}")
     return "\n".join(lines)
 
 
@@ -181,8 +190,8 @@ def daily_summary(rows: list[dict], day: str, mode=None, show_trades: bool = Tru
         for r in rows[-10:]:
             t = (r.get("exit_ts") or "")[11:16]
             lines.append(f"{t} {esc(r['symbol'])} {money(r.get('net_pnl'))}")
-    if mode == "paper":
-        lines.append("\n🧪 Practice results only. Small samples prove nothing.")
+    if mode != "live":
+        lines.append("\n🧪 Test results only. Small samples prove nothing.")
     return "\n".join(lines)
 
 

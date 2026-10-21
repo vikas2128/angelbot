@@ -14,6 +14,21 @@ import requests
 
 log = logging.getLogger("angelbot.notify")
 
+_mode: str | None = None
+
+
+def set_mode(mode: str | None) -> None:
+    """Called by the order manager so every alert is tagged LIVE or TEST."""
+    global _mode
+    _mode = mode
+
+
+def label() -> str:
+    """🔴 LIVE only when really trading live; everything else (paper, replay, pytest) is TEST."""
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return "🧪 <b>TEST</b> · unit test"
+    return "🔴 <b>LIVE</b>" if _mode == "live" else "🧪 <b>TEST</b>"
+
 
 def plain(text: str) -> str:
     """Strip tags — used if Telegram rejects the HTML."""
@@ -24,6 +39,7 @@ def send(text: str, buttons: list[list[dict]] | None = None) -> None:
     token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
         return
+    text = f"{label()}\n{text}"
 
     def _go():
         url = f"https://api.telegram.org/bot{token}/sendMessage"

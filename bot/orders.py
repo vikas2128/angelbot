@@ -24,6 +24,7 @@ class OrderManager:
         self.x = cfg["execution"]
         self.exits_cfg = cfg["exits"]
         self.mode = broker.mode
+        notify.set_mode(self.mode)
         self.inst = {i.symbol: i for i in instruments}
         self.positions: dict[str, Position] = {i.symbol: Position(i.symbol) for i in instruments}
         self.pending: dict[str, OrderRecord] = {}
@@ -180,7 +181,7 @@ class OrderManager:
             self._set_brackets(pos)
             if was_flat:
                 notify.send(messages.opened(rec.symbol, cyc["side"], qty, px, pos.stop, pos.target,
-                                            self.strategy_name, self.mode))
+                                            self.strategy_name, self.mode, now))
         else:                                                 # reduce / close
             closed = min(qty, abs(pos.qty))
             gross = (px - pos.avg_price) * closed * (1 if pos.qty > 0 else -1)
@@ -211,7 +212,7 @@ class OrderManager:
                            cyc.get("exit_reason", "unknown"), self.strategy_name)
         notify.send(messages.closed(symbol, cyc.get("side", "LONG"), cyc.get("max_qty", 0),
                                     cyc.get("entry_price", 0.0), exit_px, gross, charges, net,
-                                    cyc.get("exit_reason"), self.mode))
+                                    cyc.get("exit_reason"), self.mode, cyc.get("entry_ts"), now))
         log.info("TRADE CLOSED %s gross=%.2f charges=%.2f net=%.2f", symbol, gross, charges, net)
         pos.avg_price, pos.stop, pos.target, pos.best_price, pos.entry_time = 0.0, None, None, None, None
         self.exit_alerted.discard(symbol)

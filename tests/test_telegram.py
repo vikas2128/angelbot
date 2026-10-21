@@ -45,10 +45,16 @@ def _closed(net, reason="target"):
 
 def test_trade_cards_plain_english_and_escaped():
     opened = M.opened("SBIN-EQ", "LONG", 1, 812.4, 809.96, 817.28, "ema_cross", "paper")
-    assert "Bought SBIN-EQ" in opened and "Safety exit" in opened and "Practice" in opened
+    assert "Bought SBIN-EQ" in opened and "Safety exit" in opened
     done = M.closed("SBIN-EQ", "LONG", 1, 812.4, 817.28, 4.88, 2.28, 2.6, "target", "paper")
     assert "profit" in done and "+₹2.60" in done and "Goal reached" in done
     assert "loss" in M.closed("X", "LONG", 1, 10, 9, -1, 1, -2, "stop_loss", "live")
+    from datetime import datetime
+    from bot.timeutil import IST
+    t1 = datetime(2026, 10, 21, 10, 5, 32, tzinfo=IST)
+    assert "🕐 21 Oct, 10:05:32 IST" in M.opened("SBIN-EQ", "LONG", 1, 812.4, 809.96, 817.28, "orb", "paper", t1)
+    out = M.closed("SBIN-EQ", "LONG", 1, 812.4, 817.28, 4.88, 2.28, 2.6, "target", "paper", t1, t1)
+    assert "In 21 Oct, 10:05:32 IST" in out and "Out 21 Oct, 10:05:32 IST" in out
     assert "&lt;b&gt;" in M.order_problem("BUY", 1, "SBIN-EQ", "<b>bad</b>")      # broker text escaped
 
 
@@ -84,3 +90,26 @@ def test_ignores_unauthorised_button_press(monkeypatch):
                         if method == "getUpdates" else calls.append(method))
     t.poll_once()
     assert calls == ["answerCallbackQuery"] and control.read_control()["kill"] is False
+
+
+def test_alert_label_live_vs_test(monkeypatch):
+    from bot import notify
+    monkeypatch.setattr(notify, "_mode", "live")
+    assert "TEST" in notify.label() and "unit test" in notify.label()      # pytest can never look LIVE
+    monkeypatch.delenv("PYTEST_CURRENT_TEST")
+    assert "LIVE" in notify.label()
+    monkeypatch.setattr(notify, "_mode", "paper")
+    assert "TEST" in notify.label() and "LIVE" not in notify.label()
+    monkeypatch.setattr(notify, "_mode", None)
+    assert "TEST" in notify.label()
+
+
+def test_send_prepends_label(monkeypatch):
+    from bot import notify
+    seen = {}
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "1")
+    monkeypatch.setattr(notify.requests, "post", lambda url, json, timeout: seen.update(json) or type("R", (), {"status_code": 200})())
+    monkeypatch.setattr(notify.threading, "Thread", lambda target, daemon: type("T", (), {"start": staticmethod(target)})())
+    notify.send("hello")
+    assert seen["text"].startswith("🧪 <b>TEST</b>") and seen["text"].endswith("hello")
