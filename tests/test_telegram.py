@@ -1,5 +1,5 @@
-from bot import control
-from bot.telegram_ctl import TelegramController, handle
+from bot import control, messages as M
+from bot.telegram_ctl import TelegramController, callback, handle, route
 
 
 def test_help_and_unknown():
@@ -32,8 +32,55 @@ def test_ignores_unauthorised_chat(monkeypatch):
     updates = [{"update_id": 5, "message": {"chat": {"id": 999}, "text": "/kill CONFIRM"}},
                {"update_id": 6, "message": {"chat": {"id": 111}, "text": "/help"}}]
     monkeypatch.setattr(t, "_api", lambda method, **p: updates if method == "getUpdates" else None)
-    monkeypatch.setattr(t, "send", lambda text: sent.append(text))
+    monkeypatch.setattr(t, "send", lambda text, markup=None: sent.append(text))
     assert t.poll_once() == 2
     assert len(sent) == 1 and "/status" in sent[0]       # only the authorised chat got a reply
     assert control.read_control()["kill"] is False        # stranger's /kill ignored
     assert t.offset == 7
+
+
+def _closed(net, reason="target"):
+    return {"symbol": "SBIN-EQ", "net_pnl": net, "charges": 2.0, "exit_reason": reason, "exit_ts": "2026-10-21T10:05:00+05:30"}
+
+
+def test_trade_cards_plain_english_and_escaped():
+    opened = M.opened("SBIN-EQ", "LONG", 1, 812.4, 809.96, 817.28, "ema_cross", "paper")
+    assert "Bought SBIN-EQ" in opened and "Safety exit" in opened and "Practice" in opened
+    done = M.closed("SBIN-EQ", "LONG", 1, 812.4, 817.28, 4.88, 2.28, 2.6, "target", "paper")
+    assert "profit" in done and "+₹2.60" in done and "Goal reached" in done
+    assert "loss" in M.closed("X", "LONG", 1, 10, 9, -1, 1, -2, "stop_loss", "live")
+    assert "&lt;b&gt;" in M.order_problem("BUY", 1, "SBIN-EQ", "<b>bad</b>")      # broker text escaped
+
+
+def test_daily_summary():
+    text = M.daily_summary([_closed(6.1), _closed(-3.4, "stop_loss")], "2026-10-21", "paper")
+    assert "+₹2.70" in text and "Won 1 · Lost 1" in text and "Safety exit 1" in text
+    assert "No trades" in M.daily_summary([], "2026-10-21", "paper")
+
+
+def test_menu_and_buttons():
+    text, markup = route("/menu")
+    assert markup and any(b["callback_data"] == "kill_ask" for row in markup for b in row)
+    assert isinstance(callback("status")[0], str) and isinstance(callback("summary")[0], str)
+    assert "Paused" in callback("pause")[0] and control.read_control()["paused"] is True
+    assert "Resumed" in callback("resume")[0]
+
+
+def test_kill_button_needs_fresh_confirmation():
+    text, markup = callback("kill_ask")
+    data = markup[0][0]["callback_data"]
+    assert data.startswith("kill_do:") and control.read_control()["kill"] is False
+    stale = callback(data, now=int(data.split(":")[1]) + 3600)
+    assert "expired" in stale[0] and control.read_control()["kill"] is False
+    assert "Kill switch set" in callback(data)[0] and control.read_control()["kill"] is True
+    handle("/resume")
+
+
+def test_ignores_unauthorised_button_press(monkeypatch):
+    t = TelegramController("TOKEN", "111")
+    calls = []
+    cq = {"id": "1", "data": "kill_do:%d" % 10**10, "message": {"message_id": 3, "chat": {"id": 999}}}
+    monkeypatch.setattr(t, "_api", lambda method, **p: [{"update_id": 9, "callback_query": cq}]
+                        if method == "getUpdates" else calls.append(method))
+    t.poll_once()
+    assert calls == ["answerCallbackQuery"] and control.read_control()["kill"] is False

@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from typing import Callable
 
-from bot import notify
+from bot import messages, notify
 from bot.broker import BrokerError
 from bot.charges import order_charges
 from bot.instruments import round_to_tick
@@ -78,7 +78,7 @@ class OrderManager:
             log.error("order rejected by API: %s %s %s@%s — %s", side, qty, inst.symbol, price, e)
             self.journal.event(now, "order_error", str(e), "ERROR",
                                {"symbol": inst.symbol, "side": side, "qty": qty, "price": price})
-            notify.send(f"❗ order error {side} {qty} {inst.symbol}: {e}")
+            notify.send(messages.order_problem(side, qty, inst.symbol, e))
             return None
         rec = OrderRecord(oid, inst.symbol, side, qty, price, purpose, now, reason=reason)
         self.pending[oid] = rec
@@ -138,7 +138,7 @@ class OrderManager:
             msg = f"⚠️ exit for {rec.symbol} not filled after {rec.chases} chases — CHECK MANUALLY"
             log.error(msg)
             self.journal.event(now, "exit_stuck", msg, "ERROR")
-            notify.send(msg)
+            notify.send(messages.exit_stuck(rec.symbol, rec.chases))
 
     def _apply_status(self, rec: OrderRecord, s: dict, now: datetime) -> None:
         new_filled = int(s.get("filled_qty") or 0)
@@ -155,7 +155,7 @@ class OrderManager:
                 rec.reason = s.get("reason", "")
                 log.error("order %s REJECTED: %s", rec.order_id, rec.reason)
                 self.journal.event(now, "order_rejected", rec.reason, "ERROR", {"order_id": rec.order_id})
-                notify.send(f"❗ {rec.purpose} {rec.side} {rec.symbol} rejected: {rec.reason}")
+                notify.send(messages.order_rejected(rec.purpose, rec.side, rec.symbol, rec.reason))
 
     # ------------------------------------------------------------------ positions
     def _apply_fill(self, rec: OrderRecord, qty: int, px: float, now: datetime) -> None:
@@ -170,14 +170,17 @@ class OrderManager:
         if pos.qty == 0 or (pos.qty > 0) == (signed > 0):     # open / add
             total = abs(pos.qty) + qty
             pos.avg_price = (pos.avg_price * abs(pos.qty) + px * qty) / total
-            if pos.qty == 0:
+            was_flat = pos.qty == 0
+            if was_flat:
                 pos.entry_time = now
                 cyc.update(side="LONG" if signed > 0 else "SHORT", entry_ts=now, gross=0.0, max_qty=0)
-                notify.send(f"🟢 {cyc['side']} {rec.symbol} {qty} @ {px:.2f}")
             pos.qty += signed
             cyc["max_qty"] = max(cyc.get("max_qty", 0), abs(pos.qty))
             cyc["entry_price"] = pos.avg_price
             self._set_brackets(pos)
+            if was_flat:
+                notify.send(messages.opened(rec.symbol, cyc["side"], qty, px, pos.stop, pos.target,
+                                            self.strategy_name, self.mode))
         else:                                                 # reduce / close
             closed = min(qty, abs(pos.qty))
             gross = (px - pos.avg_price) * closed * (1 if pos.qty > 0 else -1)
@@ -206,7 +209,9 @@ class OrderManager:
         self.journal.trade(self.mode, symbol, cyc.get("side", "?"), cyc.get("max_qty", 0), cyc.get("entry_ts"),
                            cyc.get("entry_price", 0.0), now, exit_px, gross, charges,
                            cyc.get("exit_reason", "unknown"), self.strategy_name)
-        notify.send(f"🔴 closed {symbol} net ₹{net:.2f} ({cyc.get('exit_reason', '')})")
+        notify.send(messages.closed(symbol, cyc.get("side", "LONG"), cyc.get("max_qty", 0),
+                                    cyc.get("entry_price", 0.0), exit_px, gross, charges, net,
+                                    cyc.get("exit_reason"), self.mode))
         log.info("TRADE CLOSED %s gross=%.2f charges=%.2f net=%.2f", symbol, gross, charges, net)
         pos.avg_price, pos.stop, pos.target, pos.best_price, pos.entry_time = 0.0, None, None, None, None
         self.exit_alerted.discard(symbol)

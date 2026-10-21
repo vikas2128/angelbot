@@ -64,6 +64,16 @@ class Journal:
         )
 
 
+def trades_on(journal: Journal, day: str) -> list[dict]:
+    """Closed trades whose exit date is `day` (YYYY-MM-DD), oldest first — for summaries."""
+    with journal.lock:
+        cur = journal.conn.execute(
+            "SELECT mode, symbol, side, qty, entry_price, exit_price, gross_pnl, charges, net_pnl, "
+            "exit_reason, exit_ts FROM trades WHERE substr(exit_ts,1,10)=? ORDER BY exit_ts", (day,))
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
 def query_readonly(path: Path, sql: str, limit: int = 200) -> list[dict]:
     """Run a read-only SELECT (used by the MCP server). Writes are impossible: DB opened mode=ro."""
     s = sql.strip().rstrip(";")

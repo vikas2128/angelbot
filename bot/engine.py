@@ -7,10 +7,10 @@ import time
 from collections import deque
 from datetime import datetime, timedelta
 
-from bot import notify
+from bot import messages, notify
 from bot.bars import BarBuilder
 from bot.control import read_control, set_control, write_status
-from bot.journal import Journal
+from bot.journal import Journal, trades_on
 from bot.models import Bar, Instrument, Tick
 from bot.orders import OrderManager
 from bot.risk import RiskManager
@@ -211,7 +211,7 @@ class Engine:
         self.state = "flattening"
         log.warning("FLATTEN ALL: %s", reason)
         self.journal.event(self.now(), "flatten", reason, "WARNING")
-        notify.send(f"⛔ flatten all: {reason}")
+        notify.send(messages.flatten(reason))
         for oid in list(self.om.pending):
             rec = self.om.pending[oid]
             if rec.purpose == "ENTRY":
@@ -252,6 +252,17 @@ class Engine:
             "recent_signals": list(self.recent_signals),
         })
 
+    def _send_daily_summary(self) -> None:
+        """End-of-run Telegram card built from today's closed trades (message only)."""
+        day = self.now().strftime("%Y-%m-%d")
+        try:
+            rows = trades_on(self.journal, day)
+        except Exception as e:
+            log.warning("summary query failed: %s", e)
+            rows = []
+        notify.send("⏹ <b>AngelBot stopped</b>\n\n" +
+                    messages.daily_summary(rows, day, self.broker.mode, title="Day summary"))
+
     # ------------------------------------------------------------------ lifecycle
     def reconcile(self) -> None:
         """Adopt open positions at the broker for our symbols (crash-restart safety)."""
@@ -259,7 +270,7 @@ class Engine:
             for p in self.broker.positions():
                 if p["symbol"] in self.om.positions and p["netqty"] != 0:
                     self.om.adopt(p["symbol"], p["netqty"], p["avg"], self.now())
-                    notify.send(f"♻️ adopted existing position {p['symbol']} {p['netqty']} @ {p['avg']}")
+                    notify.send(messages.adopted(p["symbol"], p["netqty"], p["avg"]))
         except Exception as e:
             log.error("reconcile failed: %s", e)
 
@@ -272,7 +283,7 @@ class Engine:
     def run(self) -> int:
         self.state = "running"
         self.journal.event(self.now(), "start", f"mode={self.broker.mode} replay={self.replay}")
-        notify.send(f"▶️ started ({self.broker.mode}) {self.strategy_name} on {[i.symbol for i in self.instruments]}")
+        notify.send(messages.started(self.broker.mode, self.strategy_name, [i.symbol for i in self.instruments]))
         self.feed.start()
         ended = False
         try:
@@ -295,7 +306,7 @@ class Engine:
                 if self.risk.should_shutdown(now) and (flat or now >= at(now, self.cfg["session"]["shutdown"]) + timedelta(minutes=10)):
                     if not flat:
                         msg = "shutdown with OPEN POSITIONS/ORDERS — check broker terminal!"
-                        log.error(msg); notify.send("🚨 " + msg)
+                        log.error(msg); notify.send(messages.shutdown_open())
                         self.exit_code = 2
                     self.state = "stopped"
                     break
@@ -317,7 +328,7 @@ class Engine:
             self.feed.stop()
             self._write_status(self.om.realized_net + self.om.unrealized(self.ltp))
             self.journal.event(self.now(), "stop", f"state={self.state} pnl={self.om.realized_net:.2f}")
-            notify.send(f"⏹ stopped. realised net ₹{self.om.realized_net:.2f}, trades {self.risk.trades_today}")
+            self._send_daily_summary()
             if self.control.get("kill"):
                 set_control(kill=False, paused=True, note="auto-reset after kill; bot left paused")
         return self.exit_code
