@@ -12,11 +12,16 @@ Deliberately NO order placement and NO paper→live switching.
 from __future__ import annotations
 
 import html
+import importlib.util
 import logging
 import os
+import re
 import sys
+import tempfile
 import time
 from collections import deque
+from pathlib import Path
+from types import SimpleNamespace
 
 import requests
 
@@ -36,6 +41,7 @@ HELP = (
     "/pause - stop new trades (open ones stay protected)\n"
     "/resume - allow new trades again\n"
     "/kill - close everything and stop (asks to confirm)\n"
+    "/report - send the performance report as a file (optional: all|session|replay and a start date YYYY-MM-DD)\n"
     "/log - last 20 log lines\n"
     "/menu - show buttons\n"
     "/help - this list"
@@ -45,7 +51,10 @@ KILL_TTL_SEC = 60          # a "Yes, stop everything" button works for one minut
 
 COMMANDS = [("status", "Status and open position"), ("pnl", "Today's trades and result"),
             ("pause", "Stop new trades"), ("resume", "Allow new trades"),
+            ("report", "Send the performance report"),
             ("kill", "Emergency stop"), ("log", "Recent log lines"), ("menu", "Show buttons")]
+
+REPORT_SKILL = C.ROOT / "skills" / "angelbot-report" / "build_report.py"
 
 
 def _btn(text: str, data: str) -> dict:
@@ -55,7 +64,7 @@ def _btn(text: str, data: str) -> dict:
 def main_menu() -> list[list[dict]]:
     return [[_btn("📊 Status", "status"), _btn("💰 Today", "summary")],
             [_btn("⏸ Pause", "pause"), _btn("▶️ Resume", "resume")],
-            [_btn("🛑 Emergency stop", "kill_ask")]]
+            [_btn("📄 Report", "report"), _btn("🛑 Emergency stop", "kill_ask")]]
 
 
 def _refresh_row() -> list[list[dict]]:
@@ -94,6 +103,67 @@ def cmd_log(n: int = 20) -> str:
     return "<pre>" + html.escape(body[-3500:]) + "</pre>"      # one message, tags always balanced
 
 
+def _load_report_builder():
+    spec = importlib.util.spec_from_file_location("angelbot_build_report", REPORT_SKILL)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def build_report_file(arg: str, out_dir: Path) -> tuple[Path, str]:
+    """Build the standalone HTML report from the journal (read-only). Returns (file, caption HTML).
+
+    Raises ValueError with a message that is safe to show the user when there is nothing to report.
+    """
+    source, since = "all", "0000-00-00"
+    for word in (arg or "").split():
+        if word in ("all", "session", "replay"):
+            source = word
+        elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", word):
+            since = word
+        else:
+            raise ValueError(f"Unknown option '{word}'. Use /report [all|session|replay] [YYYY-MM-DD].")
+    if not control.JOURNAL.exists():
+        raise ValueError("No journal yet: the bot has not recorded any trades.")
+    if not REPORT_SKILL.exists():
+        raise ValueError("Report builder not found on this machine (skills/angelbot-report).")
+    br = _load_report_builder()
+    try:
+        rows = br.load_rows(SimpleNamespace(db=str(control.JOURNAL), json=None, since=since,
+                                            until="9999-99-99", source=source))
+    except SystemExit as e:                        # the builder exits with a message on bad input
+        raise ValueError(str(e)) from None
+    if not rows:
+        raise ValueError("No closed trades match that filter yet.")
+    try:
+        timeframe = f"{C.load_config()['strategy'].get('timeframe_min', 1)}-minute"
+    except Exception:
+        timeframe = "1-minute"
+    st = control.read_status()
+    setup = [{"item": "Bot process", "state": "ok" if st.get("bot_alive") else "off",
+              "detail": "Running" if st.get("bot_alive") else "Not running right now"},
+             {"item": "Trading mode", "state": "warn" if st.get("mode") == "live" else "ok",
+              "detail": str(st.get("mode") or "unknown")}] if st.get("written_at") else None
+    data = br.build(rows, timeframe, setup)
+    out = out_dir / f"angelbot-report-{now_ist():%Y-%m-%d}.html"
+    br.render(data, out)
+    k, m = data["kpis"], data["meta"]
+    pf = "n/a" if k["profit_factor"] is None else f"{k['profit_factor']:.2f}"
+    notes = []
+    if m["basis"] != "session":
+        notes.append("Includes replayed candles, not only live sessions." if m["basis"] == "mixed"
+                     else "Replayed candles, not a live session.")
+    if k["trades"] < 100:
+        notes.append("Under 100 trades: too few to judge a strategy.")
+    caption = (f"📄 <b>AngelBot report</b> · {k['trades']} trade{'' if k['trades'] == 1 else 's'}"
+               f" · {m['first_day']} to {m['last_day']}\n"
+               f"{M.mode_tag('live' if 'live' in m['mode'] else 'paper')}\n"
+               f"Net <b>{M.money(k['net'])}</b> after fees · win rate {k['win_rate'] * 100:.1f}% · "
+               f"profit factor {pf} · max drawdown {M.money(k['max_dd'])}\n"
+               + " ".join(notes) + "\nOpen the file in your phone's browser.")
+    return out, caption.strip()
+
+
 def kill_ask() -> tuple[str, list[list[dict]]]:
     text = ("⚠️ <b>Emergency stop</b>\nThis cancels waiting entries, closes ALL positions and stops the bot.\n"
             "Tap the button below within a minute, or send /kill CONFIRM.")
@@ -122,6 +192,8 @@ def route(text: str) -> tuple[str, list[list[dict]] | None]:
         return cmd_pnl(), main_menu()
     if cmd == "/log":
         return cmd_log(), None
+    if cmd == "/report":                        # the controller sends the file; this is only a fallback text
+        return "📄 Building the report…", None
     if cmd == "/pause":
         control.set_control(paused=True, note="telegram pause")
         return "⏸ <b>Paused</b>: no new trades. Open positions keep their safety exit, goal and market-close exit.", main_menu()
@@ -194,6 +266,33 @@ class TelegramController:
                 params["text"] = notify.plain(chunk)
                 self._api("sendMessage", **params)
 
+    def send_document(self, path: Path, caption: str = "") -> None:
+        url = API.format(token=self.token, method="sendDocument")
+        for parse_mode in ("HTML", None):
+            data = {"chat_id": self.chat_id, "caption": (caption if parse_mode else notify.plain(caption))[:1000]}
+            if parse_mode:
+                data["parse_mode"] = parse_mode
+            with open(path, "rb") as f:
+                r = self.s.post(url, data=data, files={"document": (Path(path).name, f, "text/html")}, timeout=70)
+            if r.status_code == 400 and parse_mode:         # bad caption HTML → resend as plain text
+                continue
+            r.raise_for_status()
+            if not r.json().get("ok"):
+                raise RuntimeError(r.json())
+            return
+
+    def send_report(self, arg: str = "") -> None:
+        """Build the report from the journal and send it as a file. Read-only; never touches the bot."""
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path, caption = build_report_file(arg, Path(tmp))
+                self.send_document(path, caption)
+        except ValueError as e:
+            self.send("📄 " + html.escape(str(e)))
+        except Exception as e:                              # never die on a report problem
+            log.exception("report error")
+            self.send("📄 Couldn't build the report: " + html.escape(str(e)))
+
     def edit(self, message_id: int, text: str, markup=None) -> None:
         """Update the message the button was on, so the chat stays tidy."""
         params = {"chat_id": self.chat_id, "message_id": message_id, "text": text[:3900],
@@ -220,6 +319,9 @@ class TelegramController:
             return
         data = cq.get("data") or ""
         log.info("button: %s", data.split(":")[0])
+        if data == "report":                                # a file can't replace the message: send it as a new one
+            self.send_report()
+            return
         try:
             text, markup = callback(data)
         except Exception as e:
@@ -244,6 +346,10 @@ class TelegramController:
                 log.warning("ignored message from unauthorised chat %s", chat)
                 continue
             log.info("command: %s", text[:50])
+            words = text.strip().split()
+            if words and words[0].split("@")[0].lower() == "/report":
+                self.send_report(" ".join(words[1:]))
+                continue
             try:
                 reply, markup = route(text)
             except Exception as e:                      # never die on a bad command

@@ -128,7 +128,9 @@ user) — for hard isolation run the bot under a separate Linux user that owns `
 
 Alerts come from the trading bot; commands are handled by the separate always-on
 `angelbot-telegram` service and are accepted **only from your chat id**:
-`/status` `/pnl` `/pause` `/resume` `/kill` (→ `/kill CONFIRM`) `/log` `/help`.
+`/status` `/pnl` `/pause` `/resume` `/kill` (→ `/kill CONFIRM`) `/log` `/help`, and
+`/report [all|session|replay] [YYYY-MM-DD]`, which builds the standalone HTML performance report from the
+journal and sends it to your chat as a file (read-only; see `skills/angelbot-report/`).
 No order placement and no paper→live switching via Telegram, by design. Commands sent while
 the service was down are discarded on restart (so a stale `/kill` can't fire later).
 Never share the bot token — if leaked, `/revoke` it in BotFather.
