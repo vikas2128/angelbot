@@ -51,4 +51,4 @@ Subclass `bot.strategies.base.Strategy`, implement `on_bar(bars, side) -> +1 | -
 test in `tests/`, then backtest + walk-forward before suggesting it.
 
 ## Slash commands
-/status · /eod-review · /backtest · /tune · /new-strategy · /preflight · /incident
+/status · /eod-review · /report · /backtest · /tune · /new-strategy · /preflight · /incident

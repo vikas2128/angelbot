@@ -1,0 +1,312 @@
+<style>
+.ab{max-width:1100px;margin-inline:auto;display:flex;flex-direction:column;gap:var(--cds-gap-lg);font-family:var(--font-anthropic-sans);color:var(--color-fg)}
+.ab *{min-width:0}
+.ab-head h1{font-family:var(--font-anthropic-serif);font-weight:400;font-size:var(--cds-font-size-title);margin:0 0 .25rem;text-wrap:balance}
+.ab-head p{margin:0;color:var(--color-fg-muted);font-size:var(--cds-font-size-body)}
+.ab-sub{margin-top:.35rem!important;font-size:var(--cds-font-size-caption)!important}
+.ab-banner{display:flex;gap:.6rem;align-items:flex-start;padding:var(--cds-pad-sm) var(--cds-pad-md);border:1px solid var(--color-border-line);border-radius:var(--cds-radius);background:var(--color-panel);font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.ab-banner .dot{flex:none;width:.5rem;height:.5rem;border-radius:50%;background:var(--color-warn);margin-top:.35rem}
+.ab-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10.5rem),1fr));gap:var(--cds-gap-md)}
+.ab-card{background:var(--color-panel);border:1px solid var(--color-border-line);border-radius:var(--cds-radius);padding:var(--cds-pad-lg)}
+.ab-kpi .lbl{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.ab-kpi .val{font-family:var(--font-anthropic-serif);font-weight:400;font-size:var(--cds-font-size-title);font-variant-numeric:tabular-nums;margin-top:.15rem}
+.ab-kpi .note{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);margin-top:.1rem}
+.ab-bad{color:var(--color-bad)}
+.ab-h{font-size:var(--cds-font-size-heading);font-weight:var(--cds-font-weight-medium);margin:0}
+.ab-n{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);margin:.15rem 0 var(--cds-gap-md)}
+.ab-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));gap:var(--cds-gap-md)}
+.ab-chart{position:relative;min-height:240px;width:100%}
+.ab-chart svg{display:block;width:100%}
+.ab-tip{position:absolute;pointer-events:none;background:var(--cds-surface-popover);border:1px solid var(--cds-border);border-radius:var(--cds-radius);box-shadow:var(--cds-shadow-popover);padding:var(--cds-pad-xs) var(--cds-pad-sm);font-size:var(--cds-font-size-caption);white-space:nowrap;opacity:0;z-index:2}
+.ab-tip .t{color:var(--cds-text-secondary)}
+.ab-wrap{overflow-x:auto}
+.ab table{width:100%;border-collapse:collapse;font-size:var(--cds-font-size-caption);font-variant-numeric:tabular-nums}
+.ab th{text-align:left;font-weight:var(--cds-font-weight-medium);color:var(--color-fg-muted);padding:.4rem .5rem;border-bottom:1px solid var(--color-border-line);white-space:nowrap}
+.ab td{padding:.5rem;border-bottom:1px solid var(--color-border-line)}
+.ab th.r,.ab td.r{text-align:right}
+.ab tr:last-child td{border-bottom:0}
+.ab-pill{display:inline-block;padding:.05rem .5rem;border-radius:999px;font-size:var(--cds-font-size-caption);border:1px solid var(--color-border-line)}
+.ab-pill.ok{color:var(--color-ok)}.ab-pill.warn{color:var(--color-warn)}.ab-pill.off{color:var(--color-fg-muted)}
+.ab-bars{display:flex;flex-direction:column;gap:var(--cds-gap-md)}
+.ab-bar{display:grid;grid-template-columns:minmax(6.5rem,9rem) 1fr minmax(5.5rem,auto);align-items:center;gap:var(--cds-gap-sm)}
+.ab-bar .lab{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.ab-bar .track{height:1.1rem;background:transparent}
+.ab-bar .fill{height:100%;border-radius:4px;min-width:2px}
+.ab-bar .num{text-align:right;font-variant-numeric:tabular-nums;font-size:var(--cds-font-size-body)}
+.ab ul{margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:.4rem;font-size:var(--cds-font-size-body);line-height:1.45}
+[data-dash-source-state=empty]{color:transparent}
+[data-dash-source-state=refreshing]{opacity:.5;transition:opacity var(--cds-dur-slow)}
+.ab-fail{display:flex;align-items:center;justify-content:center;gap:.4rem;min-height:inherit;font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.ab-fail i{width:.375rem;height:.375rem;border-radius:50%;background:var(--color-bad)}
+</style>
+
+<div class="ab" id="ab">
+  <header class="ab-head">
+    <h1>AngelBot report</h1>
+    <p id="ab-take">&nbsp;</p>
+    <p class="ab-sub"><span data-source="totals" data-field="symbols">—</span> · <span data-source="totals" data-field="timeframe">—</span> candles · <span data-source="totals" data-field="strategy">—</span> · <span data-source="totals" data-field="qty">—</span> per order · <span data-source="totals" data-field="mode">—</span> mode · <span data-source="totals" data-field="first_day">—</span> to <span data-source="totals" data-field="last_day">—</span> · <span data-source="totals" data-field="days">—</span> trading days</p>
+  </header>
+
+  <div class="ab-banner"><span class="dot"></span><span id="ab-basis">&nbsp;</span></div>
+
+  <section class="ab-kpis">
+    <div class="ab-card ab-kpi"><div class="lbl">Net result</div><div class="val ab-bad" data-source="kpis" data-field="net_pnl">—</div><div class="note">After all fees</div></div>
+    <div class="ab-card ab-kpi"><div class="lbl">Trades</div><div class="val" data-source="kpis" data-field="trades">—</div><div class="note">Closed round trips</div></div>
+    <div class="ab-card ab-kpi"><div class="lbl">Win rate</div><div class="val" data-source="kpis" data-field="win_rate">—</div><div class="note">Trades with a net profit</div></div>
+    <div class="ab-card ab-kpi"><div class="lbl">Profit factor</div><div class="val" data-source="kpis" data-field="profit_factor">—</div><div class="note">Net wins ÷ net losses. Above 1 is profitable</div></div>
+    <div class="ab-card ab-kpi"><div class="lbl">Max drawdown</div><div class="val ab-bad" data-source="kpis" data-field="max_dd">—</div><div class="note">Biggest fall from a peak</div></div>
+    <div class="ab-card ab-kpi"><div class="lbl">Fees paid</div><div class="val" data-source="kpis" data-field="fees">—</div><div class="note">Brokerage, taxes and charges</div></div>
+  </section>
+
+  <section class="ab-card">
+    <h2 class="ab-h">Running net result</h2>
+    <p class="ab-n">Cumulative result after each closed trade, after fees</p>
+    <div class="ab-chart" id="ab-equity" data-source="equity"></div>
+  </section>
+
+  <section class="ab-grid">
+    <div class="ab-card">
+      <h2 class="ab-h">Net result by day</h2>
+      <p class="ab-n">Each bar is one trading day</p>
+      <div class="ab-chart" id="ab-days" data-source="by_day"></div>
+    </div>
+    <div class="ab-card">
+      <h2 class="ab-h">Where the money went</h2>
+      <p class="ab-n">Gross result, fees and net result for all trades</p>
+      <div class="ab-bars" id="ab-fees">
+        <div class="ab-bar"><span class="lab">Gross result</span><div class="track"><div class="fill" id="ab-f-gross"></div></div><span class="num" data-source="totals" data-field="gross_pnl">—</span></div>
+        <div class="ab-bar"><span class="lab">Fees paid</span><div class="track"><div class="fill" id="ab-f-fees"></div></div><span class="num" data-source="totals" data-field="fees">—</span></div>
+        <div class="ab-bar"><span class="lab">Net result</span><div class="track"><div class="fill" id="ab-f-net"></div></div><span class="num" data-source="totals" data-field="net_pnl">—</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="ab-card">
+    <h2 class="ab-h">How trades ended</h2>
+    <p class="ab-n">Goal means the profit target was reached. Safety exit means the stop loss was hit</p>
+    <div class="ab-wrap">
+      <table id="ab-reasons" data-source="by_reason" data-row-key="reason">
+        <thead><tr><th data-field="reason">Exit reason</th><th class="r" data-field="n">Trades</th><th class="r" data-field="wins">Won</th><th class="r" data-field="gross_pnl">Gross</th><th class="r" data-field="net_pnl">Net after fees</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="ab-grid">
+    <div class="ab-card">
+      <h2 class="ab-h">What this tells us</h2>
+      <p class="ab-n">Plain reading of the numbers above</p>
+      <ul id="ab-insights"></ul>
+    </div>
+    <div class="ab-card">
+      <h2 class="ab-h">Setup status</h2>
+      <p class="ab-n">Snapshot of the server when this report was made</p>
+      <div class="ab-wrap">
+        <table id="ab-vm" data-source="vm" data-row-key="item">
+          <thead><tr><th data-field="item">Item</th><th data-field="state">State</th><th data-field="detail">Detail</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="ab-tip" id="ab-tip" style="position:fixed"></div>
+
+<script>
+dash.calc('equity', {
+  inputs: ['trades'],
+  title: 'Running net result',
+  description: 'Cumulative net result after each closed trade, with the fall from the highest point so far.',
+  fn: (trades) => {
+    let cum = 0, peak = 0;
+    return trades.map((t) => {
+      cum += Number(t.net_pnl);
+      peak = Math.max(peak, cum);
+      return { n: Number(t.n), exit_ts: t.exit_ts, cum: Math.round(cum * 100) / 100, dd: Math.round((cum - peak) * 100) / 100 };
+    });
+  }
+});
+
+dash.calc('kpis', {
+  inputs: ['totals', 'equity'],
+  title: 'Headline figures',
+  description: 'Win rate, profit factor and max drawdown worked out from the trade list; fees and net result from the journal totals.',
+  fn: (totals, equity) => {
+    const t = totals[0];
+    const winsNet = equity.reduce((s, r, i) => { const prev = i ? equity[i - 1].cum : 0; const x = r.cum - prev; return x > 0 ? s + x : s; }, 0);
+    const lossNet = equity.reduce((s, r, i) => { const prev = i ? equity[i - 1].cum : 0; const x = r.cum - prev; return x < 0 ? s + x : s; }, 0);
+    return [{
+      net_pnl: Number(t.net_pnl),
+      trades: Number(t.trades),
+      win_rate: Number(t.wins) / Number(t.trades),
+      profit_factor: lossNet ? winsNet / Math.abs(lossNet) : 0,
+      max_dd: Math.min(0, ...equity.map((r) => r.dd)),
+      fees: Number(t.fees)
+    }];
+  }
+});
+
+(function () {
+  const root = document.getElementById('ab');
+  const tip = document.getElementById('ab-tip');
+  const fmtMoney = (v) => (v < 0 ? '−' : v > 0 ? '+' : '') + '₹' + d3.format(',.2f')(Math.abs(v));
+  const fmtPlain = (v) => '₹' + d3.format(',.2f')(Math.abs(v));
+  const fmtDay = d3.utcFormat('%b %-d');
+  const dayOf = (s) => fmtDay(new Date(s));
+  const css = (n) => getComputedStyle(root).getPropertyValue(n).trim();
+
+  const fail = (el, h) => { el.innerHTML = ''; const d = document.createElement('div'); d.className = 'ab-fail'; d.style.minHeight = h + 'px'; const i = document.createElement('i'); const s = document.createElement('span'); s.textContent = 'Failed to load'; d.append(i, s); el.append(d); };
+  const setText = (sel, text) => root.querySelectorAll(sel).forEach((e) => { e.textContent = text; });
+
+  function showTip(html, x, y, box) {
+    tip.innerHTML = html;
+    const r = box.getBoundingClientRect();
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    let left = r.left + x + 12, top = r.top + y - h - 8;
+    if (left + w > window.innerWidth - 8) left = r.left + x - w - 12;
+    if (left < 8) left = 8;
+    if (top < 8) top = r.top + y + 14;
+    tip.style.left = left + 'px'; tip.style.top = top + 'px'; tip.style.opacity = 1;
+  }
+  const hideTip = () => { tip.style.opacity = 0; };
+
+  function drawEquity(box, rows) {
+    box.innerHTML = '';
+    const W = Math.max(box.clientWidth, 280), H = 260;
+    const m = { l: 56, r: 74, t: 12, b: 28 };
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`);
+    const pts = [{ n: 0, cum: 0, exit_ts: '' }].concat(rows);
+    const x = d3.scaleLinear([0, d3.max(pts, (d) => d.n)], [m.l, W - m.r]);
+    const lo = Math.min(0, d3.min(pts, (d) => d.cum)), hi = Math.max(0, d3.max(pts, (d) => d.cum));
+    const y = d3.scaleLinear([lo, hi], [H - m.b, m.t]).nice();
+    const bad = css('--cds-chart-status-critical') || css('--color-bad');
+    svg.append('g').selectAll('line').data(y.ticks(5)).join('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', (d) => y(d)).attr('y2', (d) => y(d)).attr('stroke', 'var(--cds-chart-grid)');
+    svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(0)).attr('y2', y(0)).attr('stroke', 'var(--cds-chart-reference)').attr('stroke-dasharray', '4 3');
+    svg.append('g').selectAll('text').data(y.ticks(5)).join('text').attr('x', m.l - 8).attr('y', (d) => y(d) + 4).attr('text-anchor', 'end').attr('fill', 'var(--color-fg-muted)').attr('font-size', 11).text((d) => (d < 0 ? '−' : '') + '₹' + Math.abs(d));
+    svg.append('g').selectAll('text').data(x.ticks(Math.max(2, Math.floor(W / 110)))).join('text').attr('x', (d) => x(d)).attr('y', H - 8).attr('text-anchor', 'middle').attr('fill', 'var(--color-fg-muted)').attr('font-size', 11).text((d) => (d ? 'Trade ' + d : ''));
+    const line = d3.line().x((d) => x(d.n)).y((d) => y(d.cum));
+    svg.append('path').datum(pts).attr('d', line).attr('fill', 'none').attr('stroke', dash.colors[0]).attr('stroke-width', 2).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round');
+    const last = pts[pts.length - 1];
+    svg.append('circle').attr('cx', x(last.n)).attr('cy', y(last.cum)).attr('r', 4).attr('fill', dash.colors[0]);
+    svg.append('text').attr('x', x(last.n) + 8).attr('y', y(last.cum) + 4).attr('fill', 'var(--color-fg)').attr('font-size', 12).attr('font-weight', 500).text(fmtMoney(last.cum));
+    const dot = svg.append('circle').attr('r', 4).attr('fill', 'var(--color-bg)').attr('stroke', dash.colors[0]).attr('stroke-width', 2).style('display', 'none');
+    const bis = d3.bisector((d) => d.n).center;
+    svg.append('rect').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', H - m.t - m.b).attr('fill', 'transparent')
+      .on('mousemove', (ev) => {
+        const [px] = d3.pointer(ev);
+        const d = pts[bis(pts, x.invert(px))];
+        dot.style('display', null).attr('cx', x(d.n)).attr('cy', y(d.cum));
+        const when = d.exit_ts ? dayOf(d.exit_ts) + ', ' + d.exit_ts.slice(11, 16) : 'Start';
+        showTip(`<div class="t">${when} · trade ${d.n}</div><div>${fmtMoney(d.cum)} running</div>`, x(d.n), y(d.cum), box);
+      }).on('mouseleave', () => { dot.style('display', 'none'); hideTip(); });
+  }
+
+  function drawDays(box, rows) {
+    box.innerHTML = '';
+    const W = Math.max(box.clientWidth, 260), H = 250;
+    const m = { l: 50, r: 8, t: 8, b: 34 };
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`);
+    const data = rows.map((r) => ({ day: r.day, n: Number(r.n), net: Number(r.net) }));
+    const x = d3.scaleBand(data.map((d) => d.day), [m.l, W - m.r]).padding(0.25);
+    const lo = d3.min(data, (d) => d.net), hi = Math.max(0, d3.max(data, (d) => d.net));
+    const y = d3.scaleLinear([Math.min(lo, 0), hi], [H - m.b, m.t]).nice();
+    const bad = css('--cds-chart-status-critical') || css('--color-bad');
+    svg.append('g').selectAll('line').data(y.ticks(4)).join('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', (d) => y(d)).attr('y2', (d) => y(d)).attr('stroke', 'var(--cds-chart-grid)');
+    svg.append('g').selectAll('text').data(y.ticks(4)).join('text').attr('x', m.l - 8).attr('y', (d) => y(d) + 4).attr('text-anchor', 'end').attr('fill', 'var(--color-fg-muted)').attr('font-size', 11).text((d) => (d < 0 ? '−' : '') + '₹' + Math.abs(d));
+    const every = Math.ceil(data.length / Math.max(2, Math.floor((W - m.l) / 62)));
+    svg.append('g').selectAll('text').data(data.filter((_, i) => i % every === 0)).join('text').attr('x', (d) => x(d.day) + x.bandwidth() / 2).attr('y', H - 12).attr('text-anchor', 'middle').attr('fill', 'var(--color-fg-muted)').attr('font-size', 11).text((d) => dayOf(d.day));
+    svg.append('g').selectAll('rect').data(data).join('rect')
+      .attr('x', (d) => x(d.day)).attr('width', x.bandwidth())
+      .attr('y', (d) => (d.net >= 0 ? y(d.net) : y(0))).attr('height', (d) => Math.max(1, Math.abs(y(d.net) - y(0))))
+      .attr('rx', 4).attr('fill', (d) => (d.net < 0 ? bad : dash.colors[0]))
+      .on('mousemove', (ev, d) => { const [px, py] = d3.pointer(ev, box); showTip(`<div class="t">${dayOf(d.day)} · ${d.n} trades</div><div>${fmtMoney(d.net)}</div>`, px, py, box); })
+      .on('mouseleave', hideTip);
+    svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(0)).attr('y2', y(0)).attr('stroke', 'var(--cds-chart-axis)');
+  }
+
+  const REASONS = { signal: 'Strategy exit signal', target: 'Goal reached', stop_loss: 'Safety exit (stop loss)', 'squareoff time': 'Market-close exit' };
+  function fillReasons(rows) {
+    const tb = root.querySelector('#ab-reasons tbody'); tb.innerHTML = '';
+    rows.forEach((r) => {
+      const tr = document.createElement('tr'); tr.dataset.key = r.reason;
+      const cells = [REASONS[r.reason] || r.reason, d3.format(',')(Number(r.n)), d3.format(',')(Number(r.wins)), fmtMoney(Number(r.gross_pnl)), fmtMoney(Number(r.net_pnl))];
+      cells.forEach((t, i) => { const td = document.createElement('td'); if (i) td.className = 'r'; td.textContent = t; tr.append(td); });
+      tb.append(tr);
+    });
+  }
+  function fillVm(rows) {
+    const tb = root.querySelector('#ab-vm tbody'); tb.innerHTML = '';
+    rows.forEach((r) => {
+      const tr = document.createElement('tr');
+      const a = document.createElement('td'); a.textContent = r.item;
+      const b = document.createElement('td'); const p = document.createElement('span'); p.className = 'ab-pill ' + r.state; p.textContent = { ok: 'OK', warn: 'Attention', off: 'Off' }[r.state] || r.state; b.append(p);
+      const c = document.createElement('td'); c.textContent = r.detail;
+      tr.append(a, b, c); tb.append(tr);
+    });
+  }
+  function fillFees(t) {
+    const g = Number(t.gross_pnl), f = Number(t.fees), n = Number(t.net_pnl);
+    const max = Math.max(Math.abs(g), Math.abs(f), Math.abs(n)) || 1;
+    const bad = 'var(--cds-chart-status-critical)';
+    const set = (id, v, color) => { const el = root.querySelector(id); el.style.width = (Math.abs(v) / max * 100) + '%'; el.style.background = color; };
+    set('#ab-f-gross', g, 'var(--cds-chart-muted)'); set('#ab-f-fees', f, bad); set('#ab-f-net', n, bad);
+    setText('[data-source=totals][data-field=gross_pnl]', fmtMoney(g));
+    setText('[data-source=totals][data-field=fees]', '−' + fmtPlain(f));
+    setText('[data-source=totals][data-field=net_pnl]', fmtMoney(n));
+  }
+
+  // Plain-language reading, chosen from the data. Words only; every figure on the page is marked and sourced above.
+  function narrate(t, reasons) {
+    const net = Number(t.net_pnl), gross = Number(t.gross_pnl), fees = Number(t.fees), n = Number(t.trades);
+    const take = net > 0 ? 'The strategy made money after fees.'
+      : gross > 0 ? 'The strategy made money before fees, but fees turned it into a loss.'
+      : 'The strategy lost money even before fees, and fees made it worse.';
+    const basis = t.basis === 'replay' ? 'These trades come from replaying saved candles through the bot, not from a live market session.'
+      : t.basis === 'session' ? (/live/.test(t.mode) ? 'These trades were placed with real money.' : 'These trades come from real bot sessions: live prices with simulated orders, so fills are a little optimistic.')
+      : 'This mixes real bot sessions with replayed candles. Read the two separately before drawing conclusions.';
+    const out = [];
+    out.push(fees > Math.abs(gross) ? 'Fees were larger than the strategy\'s own result, so costs weighed more than the signals.' : 'Fees were smaller than the strategy\'s own result, so the signals mattered more than costs.');
+    const target = reasons.find((r) => r.reason === 'target'), stop = reasons.find((r) => r.reason === 'stop_loss');
+    if (target && Number(target.wins) === Number(target.n)) out.push('Trades that reached the goal always won.');
+    if (stop && Number(stop.wins) === 0) out.push('Trades that hit the safety exit always lost, which is what a stop loss is for.');
+    const top = reasons.slice().sort((a, b) => Number(b.n) - Number(a.n))[0];
+    if (top) out.push('Most trades ended on "' + (REASONS[top.reason] || top.reason).toLowerCase() + '", and that group ' + (Number(top.net_pnl) < 0 ? 'lost money overall.' : 'made money overall.'));
+    if (n < 100) out.push('Fewer than 100 trades is too few to judge a strategy. Treat this as a baseline.');
+    out.push('Next test: change one thing at a time (candle size, exits or filters) and confirm on a later period the settings never saw.');
+    return { take, basis, out };
+  }
+
+  dash.onData(() => {
+    const totals = dash.data('totals'), kp = dash.data('kpis'), eq = dash.data('equity'), days = dash.data('by_day'), rs = dash.data('by_reason'), vm = dash.data('vm');
+    const eqBox = root.querySelector('#ab-equity'), dBox = root.querySelector('#ab-days');
+    if (totals.status === 'ok' && totals.data.length) {
+      const t = totals.data[0];
+      setText('[data-source=totals][data-field=first_day]', fmtDay(new Date(t.first_day)));
+      setText('[data-source=totals][data-field=last_day]', fmtDay(new Date(t.last_day)));
+      setText('[data-source=totals][data-field=days]', t.days);
+      ['symbols', 'timeframe', 'strategy', 'mode'].forEach((f) => setText('[data-source=totals][data-field=' + f + ']', t[f]));
+      setText('[data-source=totals][data-field=qty]', Number(t.qty) === 1 ? '1 share' : t.qty + ' shares');
+      fillFees(t);
+      if (rs.status === 'ok') {
+        const s = narrate(t, rs.data);
+        setText('#ab-take', s.take); setText('#ab-basis', s.basis);
+        const ul = root.querySelector('#ab-insights'); ul.innerHTML = '';
+        s.out.forEach((x) => { const li = document.createElement('li'); li.textContent = x; ul.append(li); });
+      }
+    }
+    if (kp.status === 'ok' && kp.data.length) {
+      const k = kp.data[0];
+      setText('[data-source=kpis][data-field=net_pnl]', fmtMoney(k.net_pnl));
+      setText('[data-source=kpis][data-field=trades]', d3.format(',')(k.trades));
+      setText('[data-source=kpis][data-field=win_rate]', d3.format('.1%')(k.win_rate));
+      setText('[data-source=kpis][data-field=profit_factor]', d3.format('.2f')(k.profit_factor));
+      setText('[data-source=kpis][data-field=max_dd]', fmtMoney(k.max_dd));
+      setText('[data-source=kpis][data-field=fees]', '−' + fmtPlain(k.fees));
+    }
+    if (eq.status === 'ok' && eq.data.length) drawEquity(eqBox, eq.data); else if (eq.status === 'error') fail(eqBox, 240);
+    if (days.status === 'ok' && days.data.length) drawDays(dBox, days.data); else if (days.status === 'error') fail(dBox, 240);
+    if (rs.status === 'ok') fillReasons(rs.data);
+    if (vm.status === 'ok') fillVm(vm.data);
+  });
+})();
+</script>
