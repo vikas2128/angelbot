@@ -23,12 +23,13 @@ def fetch(broker, inst: Instrument, start: datetime, end: datetime, interval: st
     """Fetch candles in API-sized chunks. Returns [[iso_ts, o, h, l, c, v], ...]."""
     out, step = [], timedelta(days=MAX_DAYS.get(interval, 30))
     cur = start
+    time.sleep(1.0)  # login/profile calls just happened; give the rate limiter room
     while cur < end:
         chunk_end = min(cur + step, end)
         rows = broker.candles(inst, interval, cur, chunk_end)
         out.extend(rows)
         cur = chunk_end + timedelta(minutes=1)
-        time.sleep(0.4)  # stay well under historical-API rate limits
+        time.sleep(1.0)  # historical API allows only a few requests/sec
     seen, dedup = set(), []
     for r in out:
         if r[0] not in seen:

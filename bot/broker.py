@@ -59,16 +59,23 @@ class LiveBroker:
     def feed_token(self) -> str:
         return self.session.get("feedToken") or self.api.getfeedToken()
 
-    def _call(self, fn, *args, relogin_ok: bool = True):
-        """Call a SmartConnect method; re-login once on auth errors."""
+    RATE_LIMIT_MARKERS = ("exceeding access rate", "Access denied", "AB1019", "429")
+
+    def _call(self, fn, *args, relogin_ok: bool = True, _rl_try: int = 0):
+        """Call a SmartConnect method; back off on rate limits, re-login once on auth errors."""
         try:
             resp = fn(*args)
         except Exception as e:
             msg = str(e)
+            if any(m in msg for m in self.RATE_LIMIT_MARKERS) and _rl_try < 5:
+                wait = 2 ** _rl_try          # 1, 2, 4, 8, 16 s
+                log.warning("rate limited by SmartAPI — retrying in %ss", wait)
+                time.sleep(wait)
+                return self._call(fn, *args, relogin_ok=relogin_ok, _rl_try=_rl_try + 1)
             if relogin_ok and any(s in msg for s in ("Invalid Token", "AG8001", "AG8002", "AB1010", "Token")):
                 log.warning("auth error (%s) — re-logging in", msg)
                 self.login()
-                return self._call(fn, *args, relogin_ok=False)
+                return self._call(fn, *args, relogin_ok=False, _rl_try=_rl_try)
             raise BrokerError(msg) from e
         if isinstance(resp, dict) and resp.get("status") is False:
             code = resp.get("errorcode", "")

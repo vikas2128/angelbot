@@ -87,3 +87,24 @@ def test_live_feed_parses_ticks(broker, inst, monkeypatch):
     tick, vol = q.get(timeout=2)
     assert tick.ltp == 801.5 and tick.token == "3045" and vol == 12345
     assert captured["sub"] == (2, [{"exchangeType": 1, "tokens": ["3045"]}])
+
+
+def test_rate_limit_backoff_then_success(broker, monkeypatch):
+    import bot.broker as bb
+    monkeypatch.setattr(bb.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise Exception("Couldn't parse the JSON response received from the server: b'Access denied because of exceeding access rate'")
+        return {"status": True, "data": [1]}
+    assert broker._call(flaky) == {"status": True, "data": [1]} and calls["n"] == 3
+
+
+def test_rate_limit_gives_up(broker, monkeypatch):
+    import bot.broker as bb
+    monkeypatch.setattr(bb.time, "sleep", lambda s: None)
+    def always():
+        raise Exception("Access denied because of exceeding access rate")
+    with pytest.raises(BrokerError):
+        broker._call(always)
