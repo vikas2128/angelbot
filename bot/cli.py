@@ -15,6 +15,7 @@ import argparse
 import json
 import logging
 import math
+import os
 import queue
 import random
 import sys
@@ -94,6 +95,7 @@ def cmd_run(args, cfg):
     slip = float(cfg.get("paper", {}).get("slippage_pct", 0.02))
 
     if args.replay:
+        os.environ.pop("TELEGRAM_BOT_TOKEN", None)   # never spam Telegram from offline replays
         insts = _instruments(cfg, Path(args.master) if args.master else None)
         if len(args.replay) != len(insts):
             sys.exit("--replay needs one CSV per configured instrument, in the same order")
@@ -221,6 +223,16 @@ def cmd_sample(args, cfg):
     print(f"wrote {len(rows)} synthetic candles → {path}  (random walk — not market data)")
 
 
+def cmd_telegram_test(args, cfg):
+    import os, requests
+    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat:
+        sys.exit("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env first")
+    r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                      json={"chat_id": chat, "text": "[AngelBot] ✅ Telegram alerts are working"}, timeout=10)
+    print("sent ✓" if r.ok else f"failed: {r.status_code} {r.text}")
+
+
 def cmd_control(args, cfg):
     if args.cmd == "status":
         print(json.dumps(control.read_status(), indent=2, default=str))
@@ -263,13 +275,15 @@ def main(argv=None):
     s.add_argument("--start-price", type=float, default=800.0); s.add_argument("--seed", type=int, default=7)
     s.add_argument("--out")
 
+    sub.add_parser("telegram-test")
     for c in ("status", "pause", "resume", "kill", "unkill"):
         sub.add_parser(c)
 
     args = ap.parse_args(argv)
     cfg = C.load_config(Path(args.config) if args.config else None)
     handlers = {"check": cmd_check, "run": cmd_run, "fetch": cmd_fetch, "backtest": cmd_backtest,
-                "instruments": cmd_instruments, "sample-data": cmd_sample}
+                "instruments": cmd_instruments, "sample-data": cmd_sample,
+                "telegram-test": cmd_telegram_test}
     rc = handlers.get(args.cmd, cmd_control)(args, cfg)
     sys.exit(rc or 0)
 
