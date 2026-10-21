@@ -1,0 +1,93 @@
+# ─────────────────────────────────────────────────────────────
+# AngelBot configuration
+# Claude Code may edit this file (strategy params, symbols, risk).
+# Trading MODE (paper/live) is NOT here on purpose: it lives in .env,
+# which Claude Code is blocked from reading or editing.
+# ─────────────────────────────────────────────────────────────
+
+timezone: Asia/Kolkata
+
+session:
+  entry_start: "09:20"      # no new entries before this (skip opening noise)
+  entry_cutoff: "15:00"     # no new entries after this
+  squareoff: "15:12"        # bot flattens everything (broker auto-squareoff is ~15:20)
+  shutdown: "15:32"         # process exits after this
+  # NSE weekday trading holidays (YYYY-MM-DD) — remaining 2026 dates, per
+  # https://www.angelone.in/nse-holidays . Add next year's list in December.
+  holidays:
+    - "2026-10-20"
+    - "2026-11-10"
+    - "2026-11-24"
+    - "2026-12-25"
+
+# Instruments to trade. Use exact Angel One trading symbols
+# (search with:  python -m bot.cli instruments RELIANCE).
+instruments:
+  - symbol: SBIN-EQ
+    exchange: NSE
+    qty: 1                  # shares (for F&O: number of LOTS)
+    product: INTRADAY       # INTRADAY (MIS) or CARRYFORWARD (NRML, F&O)
+  # - symbol: NIFTY27OCT2625000CE
+  #   exchange: NFO
+  #   qty: 1
+  #   product: CARRYFORWARD
+
+strategy:
+  name: ema_cross           # ema_cross | orb | vwap_revert
+  timeframe_min: 1          # bar size in minutes
+  allow_short: false        # intraday shorts on equity (true) or long-only (false)
+  params:
+    ema_cross:
+      fast: 9
+      slow: 21
+    orb:
+      range_minutes: 15     # opening range length
+      buffer_pct: 0.05      # breakout must clear range by this %
+    vwap_revert:
+      band_pct: 0.4         # enter when price is this % away from VWAP
+      exit_at_vwap: true
+
+# Per-trade exits handled by the bot on every tick
+exits:
+  stop_loss_pct: 0.30
+  target_pct: 0.60
+  trailing_sl_pct: 0.0      # 0 = off
+
+risk:
+  max_trades_per_day: 10
+  max_daily_loss: 500       # ₹, realised + unrealised; breach → flatten + halt for the day
+  max_daily_profit: 0       # ₹, 0 = off; lock-in → flatten + halt
+  max_open_positions: 1
+  max_order_value: 50000    # ₹ per order (hard cap)
+  max_consecutive_losses: 3 # then pause entries for cooldown_minutes
+  cooldown_minutes: 30
+  max_orders_per_sec: 3     # well under the 10 OPS algo-registration threshold
+
+execution:
+  # Algo orders must be LIMIT (no MARKET/IOC). We use "marketable" limits:
+  # BUY at LTP + buffer, SELL at LTP − buffer, rounded to tick size.
+  entry_buffer_pct: 0.05
+  exit_buffer_pct: 0.10
+  entry_timeout_sec: 8      # unfilled entry → cancel
+  exit_timeout_sec: 4       # unfilled exit → re-price (chase)
+  max_exit_chases: 5
+  order_poll_sec: 1.5
+  ordertag: angelbot
+
+paper:
+  slippage_pct: 0.02        # applied to simulated fills
+
+charges:                    # approximate — verify against Angel One's current tariff
+  brokerage_flat: 20        # ₹ per executed order …
+  brokerage_pct: 0.1        # … or this % of turnover, whichever is lower
+  stt_sell_pct: 0.025       # equity intraday, sell side
+  exchange_txn_pct: 0.00297
+  sebi_per_crore: 10
+  stamp_buy_pct: 0.003
+  gst_pct: 18
+
+feed:
+  stale_after_sec: 30       # no ticks for this long in market hours → reconnect
+
+logging:
+  level: INFO

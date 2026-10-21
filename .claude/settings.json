@@ -1,0 +1,51 @@
+{
+  "enableAllProjectMcpServers": true,
+  "permissions": {
+    "allow": [
+      "mcp__angelbot__bot_status",
+      "mcp__angelbot__service_status",
+      "mcp__angelbot__trades",
+      "mcp__angelbot__journal_query",
+      "mcp__angelbot__tail_log",
+      "mcp__angelbot__get_config",
+      "mcp__angelbot__validate_config",
+      "mcp__angelbot__list_strategies",
+      "mcp__angelbot__list_data",
+      "mcp__angelbot__run_backtest",
+      "mcp__angelbot__param_sweep",
+      "mcp__angelbot__search_instruments",
+      "Bash(./.venv/bin/python -m bot.cli backtest:*)",
+      "Bash(./.venv/bin/python -m bot.cli status)",
+      "Bash(./.venv/bin/python -m bot.cli instruments:*)",
+      "Bash(./.venv/bin/python -m pytest:*)",
+      "Bash(journalctl --user -u angelbot:*)",
+      "Bash(systemctl --user status angelbot:*)",
+      "Bash(systemctl --user list-timers:*)"
+    ],
+    "ask": [
+      "mcp__angelbot__pause_bot",
+      "mcp__angelbot__resume_bot",
+      "mcp__angelbot__kill_switch",
+      "mcp__angelbot__fetch_candles",
+      "Edit(./config/config.yaml)",
+      "Bash(systemctl --user restart angelbot:*)",
+      "Bash(systemctl --user start angelbot:*)",
+      "Bash(systemctl --user stop angelbot:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Edit(./.env)",
+      "Write(./.env)",
+      "Bash(cat .env:*)",
+      "Bash(cat ./.env:*)",
+      "Bash(less .env:*)",
+      "Bash(head .env:*)",
+      "Bash(tail .env:*)",
+      "Bash(grep:* .env)",
+      "Bash(env:*)",
+      "Bash(printenv:*)",
+      "Bash(sed:* .env)",
+      "Edit(./bot/config.py)"
+    ]
+  }
+}

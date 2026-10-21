@@ -1,0 +1,26 @@
+# systemd USER unit — installed to ~/.config/systemd/user/ by deploy/setup_oci.sh
+[Unit]
+Description=AngelBot intraday trading bot (one session per start)
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/angelbot
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Kolkata
+ExecStart=%h/angelbot/.venv/bin/python -m bot.cli run
+# Restart on crashes during the session, but NOT on:
+#   0 = normal end of day / kill switch, 2 = shut down with open positions (needs a human)
+Restart=on-failure
+RestartSec=20
+RestartPreventExitStatus=2
+StartLimitIntervalSec=1800
+StartLimitBurst=8
+# Hard stop well after market close in case anything hangs
+RuntimeMaxSec=8h
+KillSignal=SIGINT
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target
