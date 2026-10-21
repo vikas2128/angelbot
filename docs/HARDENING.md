@@ -83,7 +83,72 @@ sudo -n true                                            # a password is required
 
 Then in Claude, run `/status`. It should read the live status file and journal.
 
-## 6. What not to do in live mode
+## 6. Connect local Claude to the VM over SSH
+
+Instead of running Claude Code on the VM, your laptop's Claude can use the VM's MCP server through SSH.
+It gets **only the bot's tools** (status, trades, journal queries, logs, backtests, pause), not a shell,
+and the `.env` file is never exposed. A forced-command key makes this a hard limit.
+
+**On the laptop**, make a dedicated key (set a passphrase):
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/angelbot_mcp -C "angelbot-mcp"
+ssh-add --apple-use-keychain ~/.ssh/angelbot_mcp      # macOS: lets ssh use it without a prompt
+```
+
+**On the VM**, append the public key to `~/.ssh/authorized_keys` of the user that should run the server,
+with these options in front. Use absolute paths. The options apply whatever command the client asks for:
+
+```
+command="cd /home/ubuntu/angelbot && exec ./.venv/bin/python mcp_server/server.py",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA...your-public-key... angelbot-mcp
+```
+
+- If you set up the separate Claude user (sections 2-4), put the line in `/home/claude/.ssh/authorized_keys`
+  and start the server from the clone, with the shared paths in front:
+  `command="ANGELBOT_RUNTIME=/home/ubuntu/angelbot/runtime ANGELBOT_DATA=/home/ubuntu/angelbot/data exec /home/claude/angelbot-dev/.venv/bin/python /home/claude/angelbot-dev/mcp_server/server.py",no-pty,...`
+- Optionally add `from="<your IP>"` to the options if your IP is stable.
+- `AllowUsers` in section 1 must include that user.
+
+**On the laptop**, add to `~/.ssh/config`:
+
+```
+Host angelbot-vm
+  HostName <RESERVED_IP>
+  User ubuntu                       # or: claude
+  IdentityFile ~/.ssh/angelbot_mcp
+  IdentitiesOnly yes
+  BatchMode yes
+  ServerAliveInterval 30
+  AddKeysToAgent yes
+  UseKeychain yes                   # macOS
+```
+
+Register it with Claude Code. The name `angelbot` matches the permission rules in `.claude/settings.json`
+and overrides the repo's own local server:
+
+```bash
+claude mcp add angelbot --scope local -- ssh angelbot-vm
+```
+
+**Verify:**
+
+```bash
+ssh angelbot-vm            # should sit silently (no banner, no shell prompt). Ctrl-C to quit
+ssh -i ~/.ssh/angelbot_mcp ubuntu@<RESERVED_IP> ls     # must NOT list files: the forced command ignores it
+```
+
+Then in Claude run `/mcp` (expect `angelbot` connected) and `/status`.
+
+**Limits and cautions**
+
+- Edit and Bash in your local Claude still act on the laptop's copy of the repo. Config or code changes reach the VM
+  only after you commit, push, `git pull` on the VM and restart between sessions.
+- Pause, resume, kill switch and `fetch_candles` still ask for approval. Anything the tools return is sent to Anthropic.
+- The private key is only as safe as your laptop. Keep the passphrase, and remove the line from `authorized_keys`
+  if the laptop is lost.
+- With the separate-user setup, `pause_bot`/`resume_bot` fail by design (no write access to `runtime/`). Use Telegram.
+
+## 7. What not to do in live mode
 
 - **Never run Claude Code with auto-accept / bypass-permissions on the VM.** Approvals are the last gate.
 - **Never let Claude read, edit or move `.env`.** Switch paper to live **yourself**, by editing `.env` by hand and restarting. Keep the `ANGELBOT_LIVE_CONFIRM` line commented out until go-live.
