@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AngelBot report</title>
+<title><!--@TITLE@--></title>
 <style>
-:root{--bg:#f7f6f3;--panel:#ffffff;--fg:#1d1f23;--muted:#666a73;--line:#e3e1db;--accent:#2f5fd0;--bad:#c4382f;--ok:#2a7a4b;--warn:#a86a10;--grid:#ecebe6;--tip:#ffffff}
-@media (prefers-color-scheme:dark){:root{--bg:#14161a;--panel:#1c1f25;--fg:#e8e9ec;--muted:#9aa0ab;--line:#2c3038;--accent:#7aa2ff;--bad:#ff7d73;--ok:#59c08a;--warn:#e0a24a;--grid:#262a31;--tip:#242830;color-scheme:dark}}
+:root{--bg:#f7f6f3;--panel:#ffffff;--fg:#1d1f23;--muted:#666a73;--line:#e3e1db;--accent:#2f5fd0;--bad:#c4382f;--ok:#2a7a4b;--warn:#a86a10;--grid:#ecebe6}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--panel:#1c1f25;--fg:#e8e9ec;--muted:#9aa0ab;--line:#2c3038;--accent:#7aa2ff;--bad:#ff7d73;--ok:#59c08a;--warn:#e0a24a;--grid:#262a31;color-scheme:dark}}
 *{box-sizing:border-box}
 html{background:var(--bg)}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
@@ -24,190 +24,61 @@ h2{font-size:15px;font-weight:600;margin:0}
 .kpi .n{font-size:12px;color:var(--muted);margin-top:2px}
 .bad{color:var(--bad)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:12px}
-.chart{position:relative;margin-top:12px;min-height:240px}
-.chart svg{display:block;width:100%;height:auto}
-.tip{position:absolute;pointer-events:none;background:var(--tip);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.18);padding:4px 8px;font-size:12px;white-space:nowrap;opacity:0;z-index:2}
-.tip .t{color:var(--muted)}
+.chart{margin-top:12px}
+.chart svg{display:block;width:100%;max-width:560px;height:auto;margin:0 auto}
+svg .gl{stroke:var(--grid);stroke-width:1}
+svg .zl{stroke:var(--muted);stroke-width:1;stroke-dasharray:4 3}
+svg .ax{stroke:var(--muted);stroke-width:1}
+svg .t{fill:var(--muted);font-size:14px;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+svg .tb{fill:var(--fg);font-size:15px;font-weight:600;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+svg .ln{fill:none;stroke:var(--accent);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+svg .dt{fill:var(--accent)}
+svg .hit{fill:transparent}
+svg .bp{fill:var(--accent)}
+svg .bn{fill:var(--bad)}
 .bars{display:flex;flex-direction:column;gap:14px;margin-top:12px}
-.bar{display:grid;grid-template-columns:minmax(90px,130px) 1fr minmax(84px,auto);align-items:center;gap:10px}
+.bar{display:grid;grid-template-columns:minmax(80px,120px) 1fr minmax(84px,auto);align-items:center;gap:10px}
 .bar .lab{font-size:13px;color:var(--muted)}
 .bar .track{height:16px}
 .bar .fill{height:100%;border-radius:4px;min-width:2px}
 .bar .num{text-align:right;font-variant-numeric:tabular-nums}
+.f-muted{background:var(--muted)}.f-bad{background:var(--bad)}.f-acc{background:var(--accent)}
 .scroll{overflow-x:auto;margin-top:12px}
 table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
 th{text-align:left;font-weight:600;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:8px;border-bottom:1px solid var(--line)}
-th.r,td.r{text-align:right}
+th.r,td.r{text-align:right;white-space:nowrap}
 tr:last-child td{border-bottom:0}
 .pill{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;border:1px solid var(--line)}
 .pill.ok{color:var(--ok)}.pill.warn{color:var(--warn)}.pill.off{color:var(--muted)}
 ul{margin:12px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
 footer{color:var(--muted);font-size:12px}
-@media print{html,body{background:#fff}.tip{display:none}.card,.banner{break-inside:avoid}}
+@media (max-width:480px){.hide-s{display:none}}
+@media print{html,body{background:#fff}.card,.banner{break-inside:avoid}}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>AngelBot report</h1>
-    <p class="take" id="take"></p>
-    <p class="sub" id="sub"></p>
+    <p class="take"><!--@TAKE@--></p>
+    <p class="sub"><!--@SUB@--></p>
   </header>
-  <div class="banner"><i></i><span id="basis"></span></div>
-  <section class="kpis" id="kpis"></section>
-  <section class="card"><h2>Running net result</h2><p class="note">Cumulative result after each closed trade, after fees</p><div class="chart" id="equity"></div></section>
+  <div class="banner"><i></i><span><!--@BASIS@--></span></div>
+  <section class="kpis"><!--@KPIS@--></section>
+  <section class="card"><h2>Running net result</h2><p class="note">Cumulative result after each closed trade, after fees</p><div class="chart"><!--@EQUITY@--></div></section>
   <section class="grid">
-    <div class="card"><h2>Net result by day</h2><p class="note">Each bar is one trading day</p><div class="chart" id="days"></div></div>
-    <div class="card"><h2>Where the money went</h2><p class="note">Gross result, fees and net result for all trades</p><div class="bars" id="fees"></div></div>
+    <div class="card"><h2>Net result by day</h2><p class="note">Each bar is one trading day</p><div class="chart"><!--@DAYS@--></div></div>
+    <div class="card"><h2>Where the money went</h2><p class="note">Gross result, fees and net result for all trades</p><div class="bars"><!--@FEES@--></div></div>
   </section>
   <section class="card"><h2>How trades ended</h2><p class="note">Goal means the profit target was reached. Safety exit means the stop loss was hit</p>
-    <div class="scroll"><table><thead><tr><th>Exit reason</th><th class="r">Trades</th><th class="r">Won</th><th class="r">Gross</th><th class="r">Net after fees</th></tr></thead><tbody id="reasons"></tbody></table></div></section>
+    <div class="scroll"><table><thead><tr><th>Exit reason</th><th class="r">Trades</th><th class="r">Won</th><th class="r hide-s">Gross</th><th class="r">Net after fees</th></tr></thead><tbody><!--@REASONS@--></tbody></table></div></section>
   <section class="grid">
-    <div class="card"><h2>What this tells us</h2><p class="note">Plain reading of the numbers above</p><ul id="insights"></ul></div>
-    <div class="card" id="setupcard" hidden><h2>Setup status</h2><p class="note">Snapshot taken when this report was made</p>
-      <div class="scroll"><table><thead><tr><th>Item</th><th>State</th><th>Detail</th></tr></thead><tbody id="setup"></tbody></table></div></div>
+    <div class="card"><h2>What this tells us</h2><p class="note">Plain reading of the numbers above</p><ul><!--@INSIGHTS@--></ul></div>
+    <!--@SETUP@-->
   </section>
-  <footer id="foot"></footer>
+  <footer><!--@FOOT@--></footer>
 </div>
-<div class="tip" id="tip"></div>
-<script>
-const DATA = /*__DATA__*/null;
-(function () {
-  const $ = (id) => document.getElementById(id);
-  const NS = 'http://www.w3.org/2000/svg';
-  const nf = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const money = (v) => (v < 0 ? '−' : v > 0 ? '+' : '') + '₹' + nf.format(Math.abs(v));
-  const plain = (v) => '₹' + nf.format(Math.abs(v));
-  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const dayLabel = (s) => MONTHS[Number(s.slice(5, 7)) - 1] + ' ' + Number(s.slice(8, 10));
-  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-  const el = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
-  const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-  const tip = $('tip');
-  const showTip = (lines, x, y, box) => {
-    tip.textContent = '';
-    lines.forEach((l, i) => { const d = h('div', i ? '' : 't', l); tip.append(d); });
-    const r = box.getBoundingClientRect(), b = document.body.getBoundingClientRect();
-    let left = r.left - b.left + x + 12, top = r.top - b.top + y - tip.offsetHeight - 8;
-    if (left + tip.offsetWidth > document.documentElement.clientWidth - 8) left = r.left - b.left + x - tip.offsetWidth - 12;
-    if (top < 8) top = r.top - b.top + y + 14;
-    tip.style.left = Math.max(8, left) + 'px'; tip.style.top = top + 'px'; tip.style.opacity = 1;
-  };
-  const hideTip = () => { tip.style.opacity = 0; };
-
-  // 1-2-5 ticks over [lo, hi]
-  function ticks(lo, hi, count) {
-    const range = (hi - lo) || 1, raw = range / count, mag = Math.pow(10, Math.floor(Math.log10(raw))), err = raw / mag;
-    const step = mag * (err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1);
-    const start = Math.floor(lo / step) * step, end = Math.ceil(hi / step) * step, out = [];
-    for (let v = start; v <= end + step / 2; v += step) out.push(Math.round(v * 1e6) / 1e6);
-    return out;
-  }
-  const axisLabel = (v) => (v < 0 ? '−' : '') + '₹' + Math.abs(v);
-
-  const m = DATA.meta, k = DATA.kpis, story = DATA.story;
-
-  // header
-  $('take').textContent = story.takeaway;
-  $('sub').textContent = [m.symbols, m.timeframe + ' candles', m.strategy, m.qty + ' per order', m.mode + ' mode',
-    dayLabel(m.first_day) + ' to ' + dayLabel(m.last_day), m.days + ' trading days'].join(' · ');
-  $('basis').textContent = story.basis_note;
-  document.title = 'AngelBot report ' + m.first_day + ' to ' + m.last_day;
-  $('foot').textContent = 'Generated ' + m.generated + '. Read-only analytics from the bot journal. Net figures are after charges.';
-
-  // KPI cards
-  [['Net result', money(k.net), 'After all fees', k.net < 0],
-   ['Trades', String(k.trades), 'Closed round trips', false],
-   ['Win rate', (k.win_rate * 100).toFixed(1) + '%', 'Trades with a net profit', false],
-   ['Profit factor', k.profit_factor == null ? 'n/a' : k.profit_factor.toFixed(2), 'Net wins ÷ net losses. Above 1 is profitable', false],
-   ['Max drawdown', money(k.max_dd), 'Biggest fall from a peak', k.max_dd < 0],
-   ['Fees paid', '−' + plain(k.fees), 'Brokerage, taxes and charges', false]].forEach(([l, v, n, bad]) => {
-    const c = h('div', 'card kpi'); c.append(h('div', 'l', l), h('div', 'v' + (bad ? ' bad' : ''), v), h('div', 'n', n)); $('kpis').append(c);
-  });
-
-  // fees bars
-  const mx = Math.max(Math.abs(k.gross), Math.abs(k.fees), Math.abs(k.net)) || 1;
-  [['Gross result', k.gross, money(k.gross), 'var(--muted)'], ['Fees paid', k.fees, '−' + plain(k.fees), 'var(--bad)'], ['Net result', k.net, money(k.net), k.net < 0 ? 'var(--bad)' : 'var(--accent)']].forEach(([l, v, t, col]) => {
-    const row = h('div', 'bar'), tr = h('div', 'track'), f = h('div', 'fill');
-    f.style.width = (Math.abs(v) / mx * 100) + '%'; f.style.background = col; tr.append(f);
-    row.append(h('span', 'lab', l), tr, h('span', 'num', t)); $('fees').append(row);
-  });
-
-  // reasons table
-  DATA.by_reason.forEach((r) => {
-    const tr = h('tr');
-    [r.label, String(r.n), String(r.wins), money(r.gross), money(r.net)].forEach((t, i) => { const td = h('td', i ? 'r' : '', t); tr.append(td); });
-    $('reasons').append(tr);
-  });
-
-  // insights and setup
-  story.insights.forEach((t) => $('insights').append(h('li', '', t)));
-  if (DATA.setup && DATA.setup.length) {
-    $('setupcard').hidden = false;
-    DATA.setup.forEach((r) => {
-      const tr = h('tr'), s = h('td'), p = h('span', 'pill ' + r.state, ({ ok: 'OK', warn: 'Attention', off: 'Off' })[r.state] || r.state);
-      s.append(p); tr.append(h('td', '', r.item), s, h('td', '', r.detail)); $('setup').append(tr);
-    });
-  }
-
-  function chartBox(id, H) {
-    const box = $(id); box.textContent = '';
-    const W = Math.max(box.clientWidth, 280);
-    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img' }); box.append(svg);
-    return { box, svg, W, H };
-  }
-
-  function drawEquity() {
-    const { box, svg, W, H } = chartBox('equity', 260);
-    const mg = { l: 58, r: 76, t: 12, b: 28 };
-    const pts = [{ n: 0, cum: 0, ts: '' }].concat(DATA.equity);
-    const lo0 = Math.min(0, ...pts.map((p) => p.cum)), hi0 = Math.max(0, ...pts.map((p) => p.cum));
-    const ty = ticks(lo0, hi0, 5), lo = ty[0], hi = ty[ty.length - 1];
-    const maxN = pts[pts.length - 1].n || 1;
-    const x = (n) => mg.l + (n / maxN) * (W - mg.l - mg.r), y = (v) => mg.t + (hi - v) / ((hi - lo) || 1) * (H - mg.t - mg.b);
-    ty.forEach((v) => { svg.append(el('line', { x1: mg.l, x2: W - mg.r, y1: y(v), y2: y(v), stroke: css('--grid') }), el('text', { x: mg.l - 8, y: y(v) + 4, 'text-anchor': 'end', fill: css('--muted'), 'font-size': 11 }, axisLabel(v))); });
-    svg.append(el('line', { x1: mg.l, x2: W - mg.r, y1: y(0), y2: y(0), stroke: css('--muted'), 'stroke-dasharray': '4 3' }));
-    const xt = Math.max(2, Math.floor(W / 110));
-    for (let i = 1; i <= xt; i++) { const n = Math.round(maxN * i / xt); svg.append(el('text', { x: x(n), y: H - 8, 'text-anchor': 'middle', fill: css('--muted'), 'font-size': 11 }, 'Trade ' + n)); }
-    svg.append(el('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + x(p.n).toFixed(1) + ' ' + y(p.cum).toFixed(1)).join(' '), fill: 'none', stroke: css('--accent'), 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
-    const last = pts[pts.length - 1];
-    svg.append(el('circle', { cx: x(last.n), cy: y(last.cum), r: 4, fill: css('--accent') }), el('text', { x: x(last.n) + 8, y: y(last.cum) + 4, fill: css('--fg'), 'font-size': 12, 'font-weight': 600 }, money(last.cum)));
-    const dot = el('circle', { r: 4, fill: css('--panel'), stroke: css('--accent'), 'stroke-width': 2, style: 'display:none' }); svg.append(dot);
-    const hit = el('rect', { x: mg.l, y: mg.t, width: W - mg.l - mg.r, height: H - mg.t - mg.b, fill: 'transparent' }); svg.append(hit);
-    hit.addEventListener('mousemove', (ev) => {
-      const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * (W / r.width);
-      const n = Math.max(0, Math.min(maxN, Math.round((px - mg.l) / (W - mg.l - mg.r) * maxN))), p = pts[n];
-      dot.style.display = ''; dot.setAttribute('cx', x(p.n)); dot.setAttribute('cy', y(p.cum));
-      showTip([(p.ts ? dayLabel(p.ts.slice(0, 10)) + ', ' + p.ts.slice(11, 16) + ' · ' : '') + 'trade ' + p.n, money(p.cum) + ' running'], x(p.n) * (r.width / W), y(p.cum) * (r.width / W), box);
-    });
-    hit.addEventListener('mouseleave', () => { dot.style.display = 'none'; hideTip(); });
-  }
-
-  function drawDays() {
-    const { box, svg, W, H } = chartBox('days', 250);
-    const mg = { l: 54, r: 8, t: 8, b: 34 }, rows = DATA.by_day;
-    const lo0 = Math.min(0, ...rows.map((d) => d.net)), hi0 = Math.max(0, ...rows.map((d) => d.net));
-    const ty = ticks(lo0, hi0, 4), lo = ty[0], hi = ty[ty.length - 1];
-    const y = (v) => mg.t + (hi - v) / ((hi - lo) || 1) * (H - mg.t - mg.b);
-    const bw = (W - mg.l - mg.r) / rows.length, pad = bw * 0.25;
-    ty.forEach((v) => { svg.append(el('line', { x1: mg.l, x2: W - mg.r, y1: y(v), y2: y(v), stroke: css('--grid') }), el('text', { x: mg.l - 8, y: y(v) + 4, 'text-anchor': 'end', fill: css('--muted'), 'font-size': 11 }, axisLabel(v))); });
-    const every = Math.ceil(rows.length / Math.max(2, Math.floor((W - mg.l) / 62)));
-    rows.forEach((d, i) => {
-      const x0 = mg.l + i * bw + pad, w = Math.max(2, bw - 2 * pad), top = Math.min(y(d.net), y(0)), hgt = Math.max(1, Math.abs(y(d.net) - y(0)));
-      const bar = el('rect', { x: x0, y: top, width: w, height: hgt, rx: 4, fill: d.net < 0 ? css('--bad') : css('--accent') });
-      bar.addEventListener('mousemove', (ev) => { const r = box.getBoundingClientRect(); showTip([dayLabel(d.day) + ' · ' + d.n + ' trades', money(d.net)], ev.clientX - r.left, ev.clientY - r.top, box); });
-      bar.addEventListener('mouseleave', hideTip); svg.append(bar);
-      if (i % every === 0) svg.append(el('text', { x: x0 + w / 2, y: H - 12, 'text-anchor': 'middle', fill: css('--muted'), 'font-size': 11 }, dayLabel(d.day)));
-    });
-    svg.append(el('line', { x1: mg.l, x2: W - mg.r, y1: y(0), y2: y(0), stroke: css('--muted') }));
-  }
-
-  const draw = () => { drawEquity(); drawDays(); };
-  draw();
-  let t; window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(draw, 120); });
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
-})();
-</script>
+<script type="application/json" id="report-data"><!--@JSON@--></script>
 </body>
 </html>

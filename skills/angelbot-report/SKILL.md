@@ -5,7 +5,9 @@ description: Build a standalone HTML performance report (KPIs, running P&L, dail
 
 # AngelBot performance report
 
-Turns the bot's closed trades into **one self-contained HTML file** (no network, no CDN, no special tools).
+Turns the bot's closed trades into **one self-contained HTML file**: no network, no CDN, no special tools, and
+**no JavaScript**. Every figure and chart is already in the HTML, so it shows its data in a phone's file preview,
+a mail client, a browser with scripts off, or a printout.
 Read-only analytics: never place orders, never read credentials (`.env`), never edit trading config.
 
 Files in this folder:

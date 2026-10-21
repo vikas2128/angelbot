@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build a standalone AngelBot performance report (one HTML file) from the journal's closed trades.
 
-Python standard library only. Read-only. The output opens in any browser: no network, no CDN, no
-agent-specific tools. All numbers are worked out here and embedded in the page as JSON.
+Python standard library only. Read-only. The output opens in any browser or file preview: no network,
+no CDN, no JavaScript, no agent-specific tools. Every figure and chart is drawn here as plain HTML and SVG.
 
 Give it the trades one of two ways:
   --db runtime/journal.db     read the SQLite journal (run where the file lives, or on a copy)
@@ -16,7 +16,9 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import html
 import json
+import math
 import shutil
 import sqlite3
 import sys
@@ -155,12 +157,156 @@ def build(rows: list[dict], timeframe: str, setup: list[dict] | None) -> dict:
             "by_reason": by_reason, "story": narrate(k, by_reason, basis, meta["mode"]), "setup": setup or []}
 
 
+# ---------------------------------------------------------------- rendering (no JavaScript needed)
+# Everything is drawn here, as plain HTML and inline SVG, so the file shows its data in any viewer:
+# a phone's file preview, a mail client, a browser with scripts off, or a printout.
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+esc = lambda s: html.escape(str(s), quote=True)
+
+
+def inr(v: float) -> str:
+    """12,34,567.89 (Indian digit grouping)."""
+    whole, frac = f"{abs(v):.2f}".split(".")
+    if len(whole) > 3:
+        head, tail = whole[:-3], whole[-3:]
+        parts = []
+        while len(head) > 2:
+            parts.insert(0, head[-2:])
+            head = head[:-2]
+        whole = ",".join(([head] if head else []) + parts + [tail])
+    return f"{whole}.{frac}"
+
+
+def money(v: float) -> str:
+    return ("\u2212" if v < 0 else "+" if v > 0 else "") + "\u20b9" + inr(v)
+
+
+def plain(v: float) -> str:
+    return "\u20b9" + inr(v)
+
+
+def day_label(s: str) -> str:
+    return f"{MONTHS[int(s[5:7]) - 1]} {int(s[8:10])}"
+
+
+def axis(v: float) -> str:
+    return ("\u2212" if v < 0 else "") + "\u20b9" + f"{abs(v):g}"
+
+
+def nice_ticks(lo: float, hi: float, count: int) -> list[float]:
+    span = (hi - lo) or 1.0
+    raw = span / count
+    mag = 10 ** math.floor(math.log10(raw))
+    err = raw / mag
+    step = mag * (10 if err >= 7.5 else 5 if err >= 3.5 else 2 if err >= 1.5 else 1)
+    v = math.floor(lo / step) * step
+    out = []
+    while v <= math.ceil(hi / step) * step + step / 2:
+        out.append(round(v, 6))
+        v += step
+    return out
+
+
+def svg_equity(equity: list[dict]) -> str:
+    W, H, ml, mr, mt, mb = 440, 250, 58, 68, 12, 30
+    pts = [(0, 0.0, "")] + [(p["n"], p["cum"], p["ts"]) for p in equity]
+    ticks = nice_ticks(min(0, min(c for _, c, _ in pts)), max(0, max(c for _, c, _ in pts)), 5)
+    lo, hi = ticks[0], ticks[-1]
+    maxn = pts[-1][0] or 1
+    X = lambda n: ml + n / maxn * (W - ml - mr)
+    Y = lambda v: mt + (hi - v) / ((hi - lo) or 1) * (H - mt - mb)
+    o = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Running net result after each trade">']
+    for t in ticks:
+        o.append(f'<line class="gl" x1="{ml}" x2="{W - mr}" y1="{Y(t):.1f}" y2="{Y(t):.1f}"/>'
+                 f'<text class="t" x="{ml - 8}" y="{Y(t) + 4:.1f}" text-anchor="end">{esc(axis(t))}</text>')
+    o.append(f'<line class="zl" x1="{ml}" x2="{W - mr}" y1="{Y(0):.1f}" y2="{Y(0):.1f}"/>')
+    for i in range(1, 4):
+        n = round(maxn * i / 3)
+        o.append(f'<text class="t" x="{X(n):.1f}" y="{H - 8}" text-anchor="middle">Trade {n}</text>')
+    o.append('<path class="ln" d="' + " ".join(f'{"L" if i else "M"}{X(n):.1f} {Y(c):.1f}' for i, (n, c, _) in enumerate(pts)) + '"/>')
+    n, c, _ = pts[-1]
+    o.append(f'<circle class="dt" cx="{X(n):.1f}" cy="{Y(c):.1f}" r="4"/>'
+             f'<text class="tb" x="{X(n) + 8:.1f}" y="{Y(c) + 4:.1f}">{esc(money(c))}</text>')
+    for n, c, ts in pts[1:]:                                  # native hover text where the viewer has a pointer
+        when = f"{day_label(ts[:10])}, {ts[11:16]} \u00b7 " if ts else ""
+        o.append(f'<circle class="hit" cx="{X(n):.1f}" cy="{Y(c):.1f}" r="6"><title>{esc(when)}trade {n}: {esc(money(c))} running</title></circle>')
+    o.append("</svg>")
+    return "".join(o)
+
+
+def svg_days(rows: list[dict]) -> str:
+    W, H, ml, mr, mt, mb = 440, 240, 56, 6, 10, 34
+    ticks = nice_ticks(min(0, min(r["net"] for r in rows)), max(0, max(r["net"] for r in rows)), 4)
+    lo, hi = ticks[0], ticks[-1]
+    Y = lambda v: mt + (hi - v) / ((hi - lo) or 1) * (H - mt - mb)
+    bw = (W - ml - mr) / len(rows)
+    pad = bw * 0.22
+    every = max(1, math.ceil(len(rows) / 5))
+    o = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Net result per trading day">']
+    for t in ticks:
+        o.append(f'<line class="gl" x1="{ml}" x2="{W - mr}" y1="{Y(t):.1f}" y2="{Y(t):.1f}"/>'
+                 f'<text class="t" x="{ml - 8}" y="{Y(t) + 4:.1f}" text-anchor="end">{esc(axis(t))}</text>')
+    for i, r in enumerate(rows):
+        x0, w = ml + i * bw + pad, max(2.0, bw - 2 * pad)
+        top, h = min(Y(r["net"]), Y(0)), max(1.0, abs(Y(r["net"]) - Y(0)))
+        o.append(f'<rect class="{"bn" if r["net"] < 0 else "bp"}" x="{x0:.1f}" y="{top:.1f}" width="{w:.1f}" height="{h:.1f}" rx="3">'
+                 f'<title>{esc(day_label(r["day"]))} \u00b7 {r["n"]} trades: {esc(money(r["net"]))}</title></rect>')
+        if i % every == 0:
+            o.append(f'<text class="t" x="{x0 + w / 2:.1f}" y="{H - 12}" text-anchor="middle">{esc(day_label(r["day"]))}</text>')
+    o.append(f'<line class="ax" x1="{ml}" x2="{W - mr}" y1="{Y(0):.1f}" y2="{Y(0):.1f}"/></svg>')
+    return "".join(o)
+
+
+def render_parts(d: dict) -> dict[str, str]:
+    m, k, story = d["meta"], d["kpis"], d["story"]
+    cards = [("Net result", money(k["net"]), "After all fees", k["net"] < 0),
+             ("Trades", str(k["trades"]), "Closed round trips", False),
+             ("Win rate", f"{k['win_rate'] * 100:.1f}%", "Trades with a net profit", False),
+             ("Profit factor", "n/a" if k["profit_factor"] is None else f"{k['profit_factor']:.2f}",
+              "Net wins \u00f7 net losses. Above 1 is profitable", False),
+             ("Max drawdown", money(k["max_dd"]), "Biggest fall from a peak", k["max_dd"] < 0),
+             ("Fees paid", "\u2212" + plain(k["fees"]), "Brokerage, taxes and charges", False)]
+    kpis = "".join(f'<div class="card kpi"><div class="l">{esc(l)}</div><div class="v{" bad" if bad else ""}">{esc(v)}</div>'
+                   f'<div class="n">{esc(n)}</div></div>' for l, v, n, bad in cards)
+    mx = max(abs(k["gross"]), abs(k["fees"]), abs(k["net"])) or 1
+    fees = "".join(
+        f'<div class="bar"><span class="lab">{l}</span><div class="track"><div class="fill {cls}" style="width:{abs(v) / mx * 100:.1f}%"></div></div>'
+        f'<span class="num">{esc(t)}</span></div>'
+        for l, v, t, cls in [("Gross result", k["gross"], money(k["gross"]), "f-muted"),
+                             ("Fees paid", k["fees"], "\u2212" + plain(k["fees"]), "f-bad"),
+                             ("Net result", k["net"], money(k["net"]), "f-bad" if k["net"] < 0 else "f-acc")])
+    reasons = "".join("<tr>" + f'<td>{esc(r["label"])}</td><td class="r">{r["n"]}</td><td class="r">{r["wins"]}</td>'
+                      f'<td class="r hide-s">{esc(money(r["gross"]))}</td><td class="r">{esc(money(r["net"]))}</td>' + "</tr>"
+                      for r in d["by_reason"])
+    setup = ""
+    if d["setup"]:
+        rows = "".join(f'<tr><td>{esc(r["item"])}</td><td><span class="pill {esc(r["state"])}">'
+                       f'{esc({"ok": "OK", "warn": "Attention", "off": "Off"}.get(r["state"], r["state"]))}</span></td>'
+                       f'<td>{esc(r["detail"])}</td></tr>' for r in d["setup"])
+        setup = ('<div class="card"><h2>Setup status</h2><p class="note">Snapshot taken when this report was made</p>'
+                 '<div class="scroll"><table><thead><tr><th>Item</th><th>State</th><th>Detail</th></tr></thead>'
+                 f"<tbody>{rows}</tbody></table></div></div>")
+    sub = " \u00b7 ".join([m["symbols"], f'{m["timeframe"]} candles', m["strategy"], f'{m["qty"]} per order',
+                          f'{m["mode"]} mode', f'{day_label(m["first_day"])} to {day_label(m["last_day"])}',
+                          f'{m["days"]} trading days'])
+    return {"TITLE": esc(f'AngelBot report {m["first_day"]} to {m["last_day"]}'), "TAKE": esc(story["takeaway"]),
+            "SUB": esc(sub), "BASIS": esc(story["basis_note"]), "KPIS": kpis, "EQUITY": svg_equity(d["equity"]),
+            "DAYS": svg_days(d["by_day"]), "FEES": fees, "REASONS": reasons,
+            "INSIGHTS": "".join(f"<li>{esc(t)}</li>" for t in story["insights"]), "SETUP": setup,
+            "FOOT": esc(f'Generated {m["generated"]}. Read-only analytics from the bot journal. Net figures are after charges.')}
+
+
 def render(data: dict, out: Path) -> None:
-    template = (HERE / "template.html").read_text()
-    payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
-    if "/*__DATA__*/null" not in template:
-        sys.exit("template.html is missing the /*__DATA__*/null placeholder")
-    out.write_text(template.replace("/*__DATA__*/null", payload))
+    page = (HERE / "template.html").read_text()
+    parts = render_parts(data)
+    # data for tools and agents; an inert JSON block, never executed. "</" is escaped so it cannot end the tag.
+    parts["JSON"] = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    for key, value in parts.items():
+        marker = f"<!--@{key}@-->"
+        if marker not in page:
+            sys.exit(f"template.html is missing the {marker} placeholder")
+        page = page.replace(marker, value)
+    out.write_text(page)
 
 
 def main() -> None:

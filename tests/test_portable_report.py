@@ -60,13 +60,32 @@ def test_render_is_standalone_and_script_safe(tmp_path):
     evil = [row("2026-10-20T10:00:00+05:30", 1.0, 2.2, reason="</script><b>x")]
     out = tmp_path / "r.html"
     br.render(br.build(evil, "1-minute", None), out)
-    html = out.read_text()
-    assert "/*__DATA__*/null" not in html
-    assert "</script><b>" not in html                       # data cannot close the script tag
-    urls = set(re.findall(r"https?://[^\"' )]+", html))
+    page = out.read_text()
+    assert "<!--@" not in page                              # every placeholder was filled
+    assert "</script><b>" not in page                       # data cannot close the script tag
+    assert "&lt;/script&gt;&lt;b&gt;x" in page              # and is escaped where it is shown
+    urls = set(re.findall(r"https?://[^\"' )]+", page))
     assert urls <= {"http://www.w3.org/2000/svg"}           # no network resources, SVG namespace only
-    payload = html.split("const DATA = ", 1)[1].split(";\n(function", 1)[0]
+    payload = page.split('id="report-data">', 1)[1].split("</script>", 1)[0]
     assert json.loads(payload)["by_reason"][0]["reason"] == "</script><b>x"
+
+
+def test_report_shows_its_data_without_javascript(tmp_path):
+    """Phone file previews and mail clients do not run scripts: the figures must already be in the HTML."""
+    out = tmp_path / "r.html"
+    br.render(br.build(ROWS, "1-minute", [{"item": "Bot process", "state": "ok", "detail": "Running"}]), out)
+    page = out.read_text()
+    assert re.findall(r"<script[^>]*>", page) == ['<script type="application/json" id="report-data">']
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"<script.*?</script>|<style.*?</style>", "", page, flags=re.S)))
+    for needle in ("\u2212\u20b95.80", "Win rate", "33.3%", "Goal reached", "Safety exit (stop loss)",
+                   "Bot process", "Fewer than 100 trades", "Oct 20 to Oct 21"):
+        assert needle in text, needle
+    assert page.count('class="ln"') == 1 and "<path" in page and page.count("<rect") >= 2   # charts are drawn
+
+
+def test_indian_grouping_and_signs():
+    assert br.inr(1234567.891) == "12,34,567.89" and br.inr(999.5) == "999.50" and br.inr(1000) == "1,000.00"
+    assert br.money(-279.87) == "\u2212\u20b9279.87" and br.money(2.6) == "+\u20b92.60" and br.money(0) == "\u20b90.00"
 
 
 def test_reads_the_journal_file(tmp_path):
