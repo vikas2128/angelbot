@@ -41,11 +41,13 @@ echo "==> Unit tests"
 echo "==> systemd user service + weekday timer (runs without you being logged in)"
 sudo loginctl enable-linger "$USER"
 mkdir -p ~/.config/systemd/user
-cp deploy/angelbot.service deploy/angelbot.timer ~/.config/systemd/user/
+cp deploy/angelbot.service deploy/angelbot.timer deploy/angelbot-telegram.service ~/.config/systemd/user/
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 systemctl --user daemon-reload
 systemctl --user enable angelbot.timer
 systemctl --user start angelbot.timer
+systemctl --user enable angelbot-telegram.service
+systemctl --user restart angelbot-telegram.service || true   # exits quietly until Telegram is configured
 systemctl --user list-timers angelbot.timer --no-pager || true
 
 echo "==> Pin MCP server to absolute paths (works regardless of Claude Code's cwd)"

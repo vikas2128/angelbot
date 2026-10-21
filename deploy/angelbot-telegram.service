@@ -1,0 +1,17 @@
+# systemd USER unit — Telegram two-way control (always on, independent of the trading process)
+[Unit]
+Description=AngelBot Telegram control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/angelbot
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Kolkata
+ExecStart=%h/angelbot/.venv/bin/python -m bot.telegram_ctl
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

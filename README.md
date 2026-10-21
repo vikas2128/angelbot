@@ -119,6 +119,20 @@ user) — for hard isolation run the bot under a separate Linux user that owns `
   re-adopt open positions from the broker).
 - Update the holiday list every December.
 
+## 6b. Telegram (alerts + control)
+
+1. @BotFather → `/newbot` → copy the token; open your bot and tap **Start**.
+2. Chat id: `curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates"` → `"chat":{"id":…}`.
+3. `.env`: `TELEGRAM_BOT_TOKEN=…` and `TELEGRAM_CHAT_ID=…`, then
+   `./.venv/bin/python -m bot.cli telegram-test` and `systemctl --user restart angelbot-telegram`.
+
+Alerts come from the trading bot; commands are handled by the separate always-on
+`angelbot-telegram` service and are accepted **only from your chat id**:
+`/status` `/pnl` `/pause` `/resume` `/kill` (→ `/kill CONFIRM`) `/log` `/help`.
+No order placement and no paper→live switching via Telegram, by design. Commands sent while
+the service was down are discarded on restart (so a stale `/kill` can't fire later).
+Never share the bot token — if leaked, `/revoke` it in BotFather.
+
 ## 7. Going live (manual, human-only)
 
 Only after **≥ 3–4 weeks of paper trading** that roughly matches the backtest, and `/preflight` passes:

@@ -74,7 +74,7 @@ def bot_status() -> dict:
 def service_status() -> dict:
     """systemd state of the bot service and its start timer (OCI host)."""
     out = {}
-    for unit in ("angelbot.service", "angelbot.timer"):
+    for unit in ("angelbot.service", "angelbot.timer", "angelbot-telegram.service"):
         try:
             r = subprocess.run(["systemctl", "--user", "is-active", unit], capture_output=True, text=True, timeout=5)
             out[unit] = r.stdout.strip() or r.stderr.strip()

@@ -91,7 +91,9 @@ def cmd_run(args, cfg):
     setup_logging(cfg.get("logging", {}).get("level", "INFO"))
     log = logging.getLogger("angelbot.cli")
     q: queue.Queue = queue.Queue()
-    journal = Journal(Path(args.journal) if args.journal else control.JOURNAL)
+    # replays get their own journal so they never mix with real paper/live history
+    default_journal = control.RUNTIME_DIR / "replay_journal.db" if args.replay else control.JOURNAL
+    journal = Journal(Path(args.journal) if args.journal else default_journal)
     slip = float(cfg.get("paper", {}).get("slippage_pct", 0.02))
 
     if args.replay:
