@@ -141,3 +141,54 @@ def test_backtest_matches_replay_roughly(cfg, inst, tmp_path):
                  Journal(tmp_path / "j.db"), q, replay=True)
     eng.run()
     assert abs(bt["trades"] - eng.risk.trades_today) <= max(2, bt["trades"] // 3)
+
+
+class _FakeFeed:
+    connected = True
+    restarts = 0
+
+    def __init__(self):
+        self.last_tick_at = None
+
+    def restart(self):
+        self.restarts += 1
+
+
+def _live_engine(cfg, inst, tmp_path, monkeypatch):
+    from bot import notify
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda text, buttons=None: sent.append(text))
+    q = queue.Queue()
+    eng = Engine(cfg, PaperBroker(0.0), _FakeFeed(), [inst], Journal(tmp_path / "j.db"), q)
+    eng.now = lambda: t("09:25")
+    return eng, sent
+
+
+def test_morning_heartbeat_sent_once(cfg, inst, tmp_path, monkeypatch):
+    eng, sent = _live_engine(cfg, inst, tmp_path, monkeypatch)
+    eng.feed.last_tick_at = t("09:25")
+    eng.ltp["SBIN-EQ"] = 800.0
+    eng._periodic(); eng._periodic()
+    beats = [m for m in sent if "bot is ready" in m]
+    assert len(beats) == 1 and "SBIN-EQ" in beats[0] and "connected" in beats[0]
+
+
+def test_feed_trouble_and_recovery_alerts(cfg, inst, tmp_path, monkeypatch):
+    eng, sent = _live_engine(cfg, inst, tmp_path, monkeypatch)
+    eng.feed.last_tick_at = t("09:25") - timedelta(seconds=120)      # stale → restart
+    eng._periodic()
+    assert any("Price feed problem" in m for m in sent) and eng.feed.restarts == 1
+    eng.feed.last_tick_at = t("09:25")                               # ticks flowing again
+    eng._periodic()
+    assert any("Price feed is back" in m for m in sent)
+    assert sum("Price feed problem" in m for m in sent) == 1
+
+
+def test_cooldown_alert_after_consecutive_losses(cfg, inst, tmp_path, monkeypatch):
+    eng, sent = _live_engine(cfg, inst, tmp_path, monkeypatch)
+    n = int(cfg["risk"]["max_consecutive_losses"])
+    for _ in range(n - 1):
+        eng._on_trade_closed(-5.0, t("10:00"))
+    assert not any("Taking a break" in m for m in sent)
+    eng._on_trade_closed(-5.0, t("10:00"))
+    assert sum("Taking a break" in m for m in sent) == 1 and "10:30" in sent[-1]

@@ -158,6 +158,33 @@ def order_rejected(purpose, side, symbol, reason) -> str:
     return f"❗ <b>{what} order rejected</b>\n{esc(side)} {esc(symbol)}\nBroker said: {esc(reason or 'no reason given')}"
 
 
+def feed_trouble(last_tick, restarts) -> str:
+    seen = f"Last price seen at {esc(last_tick)}" if last_tick else "No price received yet"
+    return (f"📡 <b>Price feed problem</b>\n{seen}. Reconnecting (restart #{restarts}).\n"
+            "No new trades can be judged until prices flow again; open positions still have their safety exit.")
+
+
+def feed_back() -> str:
+    return "📡 <b>Price feed is back</b>\nPrices are flowing again."
+
+
+def cooldown(until, losses) -> str:
+    return (f"⏳ <b>Taking a break</b>\n{losses} losing trades in a row.\n"
+            f"No new trades until {esc(until.strftime('%H:%M'))}. Open positions stay protected.")
+
+
+def heartbeat(feed_ok, prices: dict, paused: bool, max_loss) -> str:
+    lines = ["☀️ <b>Good morning: bot is ready</b>",
+             f"Price feed: {'connected ✅' if feed_ok else 'NOT connected ⚠️'}"]
+    for sym, px in prices.items():
+        lines.append(f"{esc(sym)}: {price(px)}")
+    if not prices:
+        lines.append("No prices yet")
+    lines.append("New trades are paused ⏸" if paused else "New trades are allowed from now")
+    lines.append(f"Daily loss limit: {price(max_loss)}")
+    return "\n".join(lines)
+
+
 def shutdown_open() -> str:
     return "🚨 <b>Bot stopped but a position or order is still open</b>\nCheck the Angel One app now."
 

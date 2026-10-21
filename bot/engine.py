@@ -53,6 +53,8 @@ class Engine:
         self._last_feed_restart = 0.0
         self.control = {"paused": False, "kill": False}
         self.exit_code = 0
+        self._feed_alerted = False       # notification state only
+        self._heartbeat_sent = False
 
     # ------------------------------------------------------------------ time
     def now(self) -> datetime:
@@ -62,7 +64,10 @@ class Engine:
 
     # ------------------------------------------------------------------ callbacks
     def _on_trade_closed(self, net: float, now: datetime) -> None:
+        before = self.risk.cooldown_until
         self.risk.on_trade_closed(net, now)
+        if self.risk.cooldown_until and self.risk.cooldown_until != before:
+            notify.send(messages.cooldown(self.risk.cooldown_until, int(self.cfg["risk"]["max_consecutive_losses"])))
 
     def _on_bar(self, token: str, bar: Bar) -> None:
         inst = self.by_token.get(token)
@@ -192,6 +197,12 @@ class Engine:
         if self.flatten_reason:
             self._flatten_tick()
 
+        # morning heartbeat: one "I'm alive and ready" message when entries open (live only)
+        if not self.replay and not self._heartbeat_sent and now >= at(now, self.cfg["session"]["entry_start"]):
+            self._heartbeat_sent = True
+            notify.send(messages.heartbeat(bool(getattr(self.feed, "connected", False)), dict(self.ltp),
+                                           bool(self.control["paused"]), self.cfg["risk"]["max_daily_loss"]))
+
         # feed watchdog (live only, market hours)
         if not self.replay and at(now, "09:15") <= now <= at(now, "15:30"):
             stale = float(self.cfg.get("feed", {}).get("stale_after_sec", 30))
@@ -200,7 +211,13 @@ class Engine:
             if dead and time.monotonic() - self._last_feed_restart > max(stale, 30):
                 self._last_feed_restart = time.monotonic()
                 self.journal.event(now, "feed_restart", "stale/disconnected feed", "WARNING")
+                self._feed_alerted = True
+                notify.send(messages.feed_trouble(last.strftime("%H:%M:%S") if last else None,
+                                                  getattr(self.feed, "restarts", 0) + 1))
                 self.feed.restart()
+            elif not dead and self._feed_alerted:
+                self._feed_alerted = False
+                notify.send(messages.feed_back())
 
         if self.replay or time.monotonic() - self._last_status > 2.0:
             self._last_status = time.monotonic()
