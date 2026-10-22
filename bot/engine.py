@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import time
 from collections import deque
@@ -299,7 +300,7 @@ class Engine:
 
     def run(self) -> int:
         self.state = "running"
-        self.journal.event(self.now(), "start", f"mode={self.broker.mode} replay={self.replay}")
+        self.journal.event(self.now(), "start", f"mode={self.broker.mode} replay={self.replay} profile={os.environ.get('ANGELBOT_PROFILE', '')}")
         notify.send(messages.started(self.broker.mode, self.strategy_name, [i.symbol for i in self.instruments]))
         self.feed.start()
         ended = False

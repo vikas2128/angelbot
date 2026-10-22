@@ -1,4 +1,5 @@
 .env
+profiles/*.env
 .venv/
 __pycache__/
 *.pyc

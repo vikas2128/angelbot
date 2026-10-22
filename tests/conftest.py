@@ -6,6 +6,13 @@ os.environ["ANGELBOT_RUNTIME"] = os.path.join(_TMP, "runtime")
 os.environ["ANGELBOT_DATA"] = os.path.join(_TMP, "data")
 os.environ.pop("ANGELBOT_MODE", None)
 os.environ.pop("ANGELBOT_LIVE_CONFIRM", None)
+# Tests are their own area: they must never reach the Paper or Live Telegram bot, nor read an area's config or profile.
+for _k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ANGELBOT_PROFILE", "ANGELBOT_CONFIG"):
+    os.environ.pop(_k, None)
+# Optional: alerts from the tests go to the separate TEST bot, and only if you set both of these yourself.
+if os.environ.get("ANGELBOT_TEST_TELEGRAM_BOT_TOKEN") and os.environ.get("ANGELBOT_TEST_TELEGRAM_CHAT_ID"):
+    os.environ["TELEGRAM_BOT_TOKEN"] = os.environ["ANGELBOT_TEST_TELEGRAM_BOT_TOKEN"]
+    os.environ["TELEGRAM_CHAT_ID"] = os.environ["ANGELBOT_TEST_TELEGRAM_CHAT_ID"]
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import copy

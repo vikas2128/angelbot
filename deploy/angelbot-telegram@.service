@@ -1,0 +1,19 @@
+# systemd USER template unit: Telegram two-way control for one area (paper | live), always on, independent of trading.
+# Each area has its OWN Telegram bot token in profiles/<area>.env: two controllers must never share a token.
+[Unit]
+Description=AngelBot Telegram control (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/angelbot
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Kolkata
+EnvironmentFile=%h/angelbot/profiles/%i.env
+ExecStart=%h/angelbot/.venv/bin/python -m bot.telegram_ctl
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

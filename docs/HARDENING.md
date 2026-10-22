@@ -62,7 +62,7 @@ As `claude`:
 git clone <your repo URL> ~/angelbot-dev && cd ~/angelbot-dev
 python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
 # do NOT run deploy/setup_oci.sh here: it installs systemd units and prompts for .env
-echo 'export ANGELBOT_RUNTIME=/home/ubuntu/angelbot/runtime' >> ~/.bashrc    # read live status/journal/log
+echo 'export ANGELBOT_RUNTIME=/home/ubuntu/angelbot/runtime/paper' >> ~/.bashrc    # read live status/journal/log
 echo 'export ANGELBOT_DATA=/home/ubuntu/angelbot/data'       >> ~/.bashrc    # read candle CSVs for backtests
 ```
 
@@ -77,7 +77,7 @@ Then run `claude` from `~/angelbot-dev` and approve the `angelbot` MCP server.
 ```bash
 cat /home/ubuntu/angelbot/.env                          # Permission denied
 touch /home/ubuntu/angelbot/bot/x                       # Permission denied
-sqlite3 -readonly /home/ubuntu/angelbot/runtime/journal.db 'select count(*) from trades'   # works
+sqlite3 -readonly /home/ubuntu/angelbot/runtime/paper/journal.db 'select count(*) from trades'   # works
 sudo -n true                                            # a password is required / not allowed
 ```
 
@@ -103,9 +103,10 @@ with these options in front. Use absolute paths. The options apply whatever comm
 command="cd /home/ubuntu/angelbot && exec ./.venv/bin/python mcp_server/server.py",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA...your-public-key... angelbot-mcp
 ```
 
+- Once the areas exist (see `docs/ENVIRONMENTS.md`), the MCP server reads `runtime/paper/` by default, so this line needs no extra variables for the paper area.
 - If you set up the separate Claude user (sections 2-4), put the line in `/home/claude/.ssh/authorized_keys`
   and start the server from the clone, with the shared paths in front:
-  `command="ANGELBOT_RUNTIME=/home/ubuntu/angelbot/runtime ANGELBOT_DATA=/home/ubuntu/angelbot/data exec /home/claude/angelbot-dev/.venv/bin/python /home/claude/angelbot-dev/mcp_server/server.py",no-pty,...`
+  `command="ANGELBOT_RUNTIME=/home/ubuntu/angelbot/runtime/paper ANGELBOT_DATA=/home/ubuntu/angelbot/data exec /home/claude/angelbot-dev/.venv/bin/python /home/claude/angelbot-dev/mcp_server/server.py",no-pty,...`
 - Optionally add `from="<your IP>"` to the options if your IP is stable.
 - `AllowUsers` in section 1 must include that user.
 

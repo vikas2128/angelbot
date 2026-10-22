@@ -105,9 +105,9 @@ def test_alert_label_live_vs_test(monkeypatch):
     monkeypatch.delenv("PYTEST_CURRENT_TEST")
     assert "LIVE" in notify.label()
     monkeypatch.setattr(notify, "_mode", "paper")
-    assert "TEST" in notify.label() and "LIVE" not in notify.label()
+    assert "PAPER" in notify.label() and "LIVE" not in notify.label()
     monkeypatch.setattr(notify, "_mode", None)
-    assert "TEST" in notify.label()
+    assert "PAPER" in notify.label()
 
 
 def test_send_prepends_label(monkeypatch):
@@ -118,7 +118,7 @@ def test_send_prepends_label(monkeypatch):
     monkeypatch.setattr(notify.requests, "post", lambda url, json, timeout: seen.update(json) or type("R", (), {"status_code": 200})())
     monkeypatch.setattr(notify.threading, "Thread", lambda target, daemon: type("T", (), {"start": staticmethod(target)})())
     notify.send("hello")
-    assert seen["text"].startswith("🧪 <b>TEST</b>") and seen["text"].endswith("hello")
+    assert seen["text"].startswith("🧪 <b>TEST</b> · unit test") and seen["text"].endswith("hello")
 
 
 def _journal(path):
@@ -143,7 +143,7 @@ def test_report_file_built_from_journal(tmp_path, monkeypatch):
     page = path.read_text()
     assert path.name == "angelbot-report-2026-10-22.html" and 'id="today"' in page and 'id="month"' in page
     assert "Today</b>: 1 trade," in caption and "October 2026</b>: 2 trades" in caption
-    assert "Under 100 trades" in caption and "TEST" in caption and "Tabs: Today and Month" in caption
+    assert "Under 100 trades" in caption and "PAPER" in caption and "Tabs: Today and Month" in caption
     path2, caption2 = build_report_file("session 2026-10-22", out)          # month tab restarts on the date given
     assert "Since Oct 22</b>: 1 trade," in caption2
     path3, caption3 = build_report_file("replay", out)

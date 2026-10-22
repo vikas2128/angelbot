@@ -1,0 +1,13 @@
+# Starts the bot for one area every weekday at 09:05 IST. The bot itself skips NSE holidays
+# (session.holidays in that area's config) and exits after session.shutdown.
+#   systemctl --user enable --now angelbot@paper.timer     (never enable angelbot@live.timer until you go live, by hand)
+[Unit]
+Description=Start AngelBot (%i) on weekday mornings
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09:05:00 Asia/Kolkata
+Persistent=false
+Unit=angelbot@%i.service
+
+[Install]
+WantedBy=timers.target

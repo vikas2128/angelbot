@@ -21,6 +21,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Work on one area's files. Without ANGELBOT_RUNTIME: use runtime/<ANGELBOT_PROFILE>, or the paper area once it exists
+# (so a server started without .mcp.json, such as over SSH, still reads the paper area), or the old runtime/ folder.
+import os  # noqa: E402
+
+if "ANGELBOT_RUNTIME" not in os.environ:
+    _area = os.environ.get("ANGELBOT_PROFILE") or ("paper" if (ROOT / "runtime" / "paper").is_dir() else "")
+    if _area:
+        os.environ["ANGELBOT_PROFILE"] = _area
+        os.environ["ANGELBOT_RUNTIME"] = str(ROOT / "runtime" / _area)
+
 from bot import config as C  # noqa: E402
 from bot import control  # noqa: E402
 from bot.journal import query_readonly  # noqa: E402

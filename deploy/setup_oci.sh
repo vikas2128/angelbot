@@ -33,7 +33,16 @@ if [[ ! -f .env ]]; then
   echo "   created .env — edit it now:  nano .env"
 fi
 chmod 600 .env
-mkdir -p runtime data/candles
+mkdir -p runtime/paper runtime/live runtime/research data/candles
+
+echo "==> Area files (paper / research; live is prepared but left off)"
+for area in paper research; do
+  if [[ ! -f "profiles/$area.env" ]]; then
+    cp "profiles/$area.env.example" "profiles/$area.env"
+    echo "   created profiles/$area.env: set its Telegram bot token and chat id"
+  fi
+  chmod 600 "profiles/$area.env"
+done
 
 echo "==> Unit tests"
 ./.venv/bin/python -m pytest -q || { echo "tests failed — fix before scheduling"; exit 1; }
@@ -41,18 +50,20 @@ echo "==> Unit tests"
 echo "==> systemd user service + weekday timer (runs without you being logged in)"
 sudo loginctl enable-linger "$USER"
 mkdir -p ~/.config/systemd/user
-cp deploy/angelbot.service deploy/angelbot.timer deploy/angelbot-telegram.service ~/.config/systemd/user/
+cp deploy/angelbot@.service deploy/angelbot@.timer deploy/angelbot-telegram@.service ~/.config/systemd/user/
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 systemctl --user daemon-reload
-systemctl --user enable angelbot.timer
-systemctl --user start angelbot.timer
-systemctl --user enable angelbot-telegram.service
-systemctl --user restart angelbot-telegram.service || true   # exits quietly until Telegram is configured
-systemctl --user list-timers angelbot.timer --no-pager || true
+# Only the PAPER area is switched on. Live is installed as a template but is never enabled or started here:
+# going live is a manual step (see profiles/live.env.example and docs/ENVIRONMENTS.md).
+systemctl --user enable angelbot@paper.timer
+systemctl --user start angelbot@paper.timer
+systemctl --user enable angelbot-telegram@paper.service
+systemctl --user restart angelbot-telegram@paper.service || true   # exits quietly until the paper bot token is set
+systemctl --user list-timers 'angelbot@*' --no-pager || true
 
 echo "==> Pin MCP server to absolute paths (works regardless of Claude Code's cwd)"
 jq --arg py "$PROJECT_DIR/.venv/bin/python" --arg srv "$PROJECT_DIR/mcp_server/server.py" \
-  '.mcpServers.angelbot.command=$py | .mcpServers.angelbot.args=[$srv]' \
+  '.mcpServers.angelbot.command=$py | .mcpServers.angelbot.args=[$srv] | .mcpServers.angelbot.env.ANGELBOT_PROFILE="paper"' \
   .mcp.json > .mcp.json.tmp && mv .mcp.json.tmp .mcp.json
 
 echo "==> Claude Code CLI"
@@ -67,11 +78,13 @@ cat <<'EOF'
 
 Next:
   1. nano .env                         # fill SmartAPI key, client code, PIN, TOTP secret (mode stays paper)
-  2. ./.venv/bin/python -m bot.cli check   # login test + shows this VM's public IP
+     nano profiles/paper.env           # the PAPER Telegram bot token + your chat id
+     nano profiles/research.env        # the TEST Telegram bot token (replays send one summary there)
+  2. ./deploy/ab paper check           # login test + shows this VM's public IP
      → register that IP as the static IP of your SmartAPI app (needed for orders)
-  3. ./.venv/bin/python -m bot.cli fetch SBIN-EQ --days 60
-     ./.venv/bin/python -m bot.cli backtest SBIN-EQ
+  3. ./deploy/ab paper fetch SBIN-EQ --days 60
+     ./deploy/ab research backtest SBIN-EQ
   4. claude                            # in ~/angelbot — approve the 'angelbot' MCP server, try /status
-The timer starts the bot (paper mode) at 09:05 IST every weekday.
-Logs: journalctl --user -u angelbot -f     Status: ./.venv/bin/python -m bot.cli status
+The timer starts the PAPER bot at 09:05 IST every weekday. Live is prepared but off (docs/ENVIRONMENTS.md).
+Logs: journalctl --user -u angelbot@paper -f     Status: ./deploy/ab paper status
 EOF

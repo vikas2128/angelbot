@@ -3,7 +3,7 @@
 ```
             Oracle Cloud VM (Mumbai/Hyderabad, reserved static IP)
  ┌──────────────────────────────────────────────────────────────────────┐
- │  systemd timer 09:05 IST Mon–Fri ─▶ angelbot.service (python -m bot.cli run)
+ │  systemd timer 09:05 IST Mon–Fri ─▶ angelbot@paper.service (python -m bot.cli run)
  │                                                                      │
  │  SmartAPI WebSocket ─ticks─▶ BarBuilder ─▶ Strategy ─▶ RiskManager    │
  │                                   │                       │          │
@@ -63,7 +63,8 @@ cd ~/angelbot && bash deploy/setup_oci.sh        # packages, IST timezone, venv,
    Register the VM's **reserved IP** as the app's **primary static IP** (you can change it at most
    once a week, and one IP can belong to only one client).
 2. Enable **TOTP** for your Angel One account and copy the **base32 secret** (text under the QR).
-3. `nano .env` → fill `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PIN`, `ANGEL_TOTP_SECRET`.
+3. `nano .env` → fill `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PIN`, `ANGEL_TOTP_SECRET`. Paper, live, research and test are
+   separate areas with their own files and Telegram bots: see `docs/ENVIRONMENTS.md`.
    Leave `ANGELBOT_MODE=paper`. Optional: Telegram bot token + chat id for alerts.
 4. Verify:
    ```bash
@@ -111,11 +112,11 @@ user) — for hard isolation run the bot under a separate Linux user that owns `
 ## 6. Daily operation
 
 - Timer starts the bot **09:05 IST Mon–Fri**; it skips holidays in `config.yaml`, flattens at 15:12, exits ~15:32.
-- `./.venv/bin/python -m bot.cli status` · `journalctl --user -u angelbot -f` · `systemctl --user list-timers`
+- `./deploy/ab paper status` · `journalctl --user -u angelbot@paper -f` · `systemctl --user list-timers`
 - Pause entries: `bot.cli pause` · resume: `bot.cli resume`
 - **Kill switch:** `bot.cli kill` → cancels entries, exits everything with limit orders, stops.
   It then leaves the bot **paused** — run `bot.cli resume` before the next session.
-- Config changes apply at next start (or `systemctl --user restart angelbot` — mid-session restarts
+- Config changes apply at next start (or `systemctl --user restart angelbot@paper` — mid-session restarts
   re-adopt open positions from the broker).
 - Update the holiday list every December.
 
@@ -123,11 +124,11 @@ user) — for hard isolation run the bot under a separate Linux user that owns `
 
 1. @BotFather → `/newbot` → copy the token; open your bot and tap **Start**.
 2. Chat id: `curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates"` → `"chat":{"id":…}`.
-3. `.env`: `TELEGRAM_BOT_TOKEN=…` and `TELEGRAM_CHAT_ID=…`, then
-   `./.venv/bin/python -m bot.cli telegram-test` and `systemctl --user restart angelbot-telegram`.
+3. `profiles/paper.env`: `TELEGRAM_BOT_TOKEN=…` (the Paper bot) and `TELEGRAM_CHAT_ID=…`, then
+   `./deploy/ab paper telegram-test` and `systemctl --user restart angelbot-telegram@paper`. Each area has its own bot: see `docs/ENVIRONMENTS.md`.
 
 Alerts come from the trading bot; commands are handled by the separate always-on
-`angelbot-telegram` service and are accepted **only from your chat id**:
+`angelbot-telegram@<area>` service and are accepted **only from your chat id**, and act only on that area's files:
 `/status` `/pnl` `/pause` `/resume` `/kill` (→ `/kill CONFIRM`) `/log` `/help`, and
 `/report [all|session|replay] [YYYY-MM-DD]`, which builds the standalone two-tab HTML report (Today and Month) from the
 journal and sends it to your chat as a file (read-only; see `skills/angelbot-report/`), and
@@ -222,7 +223,7 @@ support; rules and broker implementations change.
 | `AG8001 Invalid Token` loops | session expired (midnight) — bot re-logs in; restart service if persistent |
 | no ticks / feed restarts | market closed, token wrong for exchange, or network; see `tail_log` |
 | `Instrument ... not found` | symbol typo or expired contract → `bot.cli instruments <name> --exchange NFO` |
-| bot didn't start | holiday, weekend, timer disabled → `systemctl --user list-timers` |
+| bot didn't start | holiday, weekend, timer disabled → `systemctl --user list-timers` (`angelbot@paper.timer`) |
 | bot started but no trades after a kill | it's paused → `bot.cli resume` |
 
 ## Layout
@@ -231,7 +232,8 @@ support; rules and broker implementations change.
 bot/            engine, strategies, risk, orders, broker, paper, feed, backtest, journal, cli
 mcp_server/     MCP server for Claude Code (.mcp.json registers it)
 config/         config.yaml  (strategy, instruments, risk, session, execution, charges)
-deploy/         setup_oci.sh, angelbot.service, angelbot.timer
+deploy/         setup_oci.sh, angelbot@.service/.timer, angelbot-telegram@.service, ab (area wrapper), split_journal.py
+profiles/       paper / live / research env templates (the real *.env files are secret and git-ignored)
 .claude/        settings.json (permissions), commands/ (slash commands)   CLAUDE.md (Claude's rules)
 tests/          25 unit/integration tests (paper broker, replay engine, risk, live adapters w/ fakes)
 ```

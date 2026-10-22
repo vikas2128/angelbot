@@ -34,16 +34,18 @@ bot/journal.py       SQLite: trades, orders, signals, events (runtime/journal.db
 bot/control.py       runtime/control.json (pause/kill) + runtime/status.json (heartbeat)
 mcp_server/server.py MCP tools you use (angelbot server, see .mcp.json)
 config/config.yaml   strategy, instruments, risk, session, execution — you MAY edit (with approval)
+profiles/            paper / live / research areas: own runtime/<area>/, Telegram bot, services (see docs/ENVIRONMENTS.md).
+                     profiles/*.env are secret like .env: never read or edit them. Live is prepared but OFF: never enable it.
 ```
 
 ## Common commands
 ```bash
-./.venv/bin/python -m bot.cli status
+./deploy/ab paper status
 ./.venv/bin/python -m bot.cli backtest SBIN-EQ --from 2026-08-01 --to 2026-09-15 --strategy orb
 ./.venv/bin/python -m bot.cli run --replay data/candles/SBIN-EQ_ONE_MINUTE.csv   # offline paper replay
 ./.venv/bin/python -m pytest -q
-journalctl --user -u angelbot -n 200 --no-pager
-systemctl --user status angelbot
+journalctl --user -u angelbot@paper -n 200 --no-pager
+systemctl --user status angelbot@paper
 ```
 
 ## Writing a new strategy

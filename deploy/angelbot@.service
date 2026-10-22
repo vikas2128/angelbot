@@ -1,6 +1,7 @@
-# systemd USER unit — installed to ~/.config/systemd/user/ by deploy/setup_oci.sh
+# systemd USER template unit. The instance name is the area: paper | live. Installed to ~/.config/systemd/user/ by deploy/setup_oci.sh.
+#   systemctl --user start angelbot@paper      (live: installed but never enabled by the setup script)
 [Unit]
-Description=AngelBot intraday trading bot (one session per start)
+Description=AngelBot trading bot (%i): one session per start
 After=network-online.target time-sync.target
 Wants=network-online.target
 
@@ -9,6 +10,8 @@ Type=simple
 WorkingDirectory=%h/angelbot
 Environment=PYTHONUNBUFFERED=1
 Environment=TZ=Asia/Kolkata
+# No "-" prefix on purpose: without profiles/%i.env the service refuses to start (live stays off until you create its file).
+EnvironmentFile=%h/angelbot/profiles/%i.env
 ExecStart=%h/angelbot/.venv/bin/python -m bot.cli run
 # Restart on crashes during the session, but NOT on:
 #   0 = normal end of day / kill switch, 2 = shut down with open positions (needs a human)

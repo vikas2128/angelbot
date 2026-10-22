@@ -45,7 +45,26 @@
       "Bash(env:*)",
       "Bash(printenv:*)",
       "Bash(sed:* .env)",
-      "Edit(./bot/config.py)"
+      "Edit(./bot/config.py)",
+      "Read(./profiles/*.env)",
+      "Edit(./profiles/*.env)",
+      "Write(./profiles/*.env)",
+      "Bash(cat profiles/*.env:*)",
+      "Bash(cat ./profiles/*.env:*)",
+      "Bash(less profiles/*.env:*)",
+      "Bash(head profiles/*.env:*)",
+      "Bash(tail profiles/*.env:*)",
+      "Bash(grep:* profiles/*.env)",
+      "Bash(sed:* profiles/*.env)",
+      "Bash(systemctl --user enable angelbot@live:*)",
+      "Bash(systemctl --user enable angelbot-telegram@live:*)",
+      "Bash(systemctl --user enable --now angelbot@live:*)",
+      "Bash(systemctl --user enable --now angelbot-telegram@live:*)",
+      "Bash(systemctl --user start angelbot@live:*)",
+      "Bash(systemctl --user restart angelbot@live:*)",
+      "Bash(systemctl --user start angelbot-telegram@live:*)",
+      "Bash(systemctl --user restart angelbot-telegram@live:*)",
+      "Bash(./deploy/ab live run:*)"
     ]
   }
 }

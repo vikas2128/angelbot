@@ -113,7 +113,9 @@ def cmd_run(args, cfg):
     slip = float(cfg.get("paper", {}).get("slippage_pct", 0.02))
 
     if args.replay:
-        os.environ.pop("TELEGRAM_BOT_TOKEN", None)   # never spam Telegram from offline replays
+        from bot import messages, notify
+        notify.set_replay(True)
+        notify.set_muted(True)                        # never one message per replayed trade
         insts = _instruments(cfg, Path(args.master) if args.master else None)
         if len(args.replay) != len(insts):
             sys.exit("--replay needs one CSV per configured instrument, in the same order")
@@ -129,6 +131,10 @@ def cmd_run(args, cfg):
             results.append({"day": d, "net": round(eng.om.realized_net, 2), "trades": eng.risk.trades_today,
                             "halted": eng.risk.halted_reason})
         print(json.dumps({"days": len(days), "net_pnl": round(total, 2), "per_day": results}, indent=2))
+        if os.environ.get("ANGELBOT_PROFILE") == "research":   # one summary to the Test bot, and only from that area
+            notify.set_muted(False)
+            notify.send(messages.replay_summary(len(days), total, sum(r["trades"] for r in results),
+                                                min((r["net"] for r in results), default=None)))
         return code
 
     today = now_ist()
@@ -300,7 +306,17 @@ def cmd_telegram_test(args, cfg):
     print("sent ✓" if r.ok else f"failed: {r.status_code} {r.text}")
 
 
+def _no_area_guard(cmd: str) -> None:
+    """After the areas exist (runtime/paper or runtime/live), a bare pause/kill would write to the old runtime/ folder
+    and silently not reach the running bot. Refuse and say how to address the right area."""
+    if os.environ.get("ANGELBOT_PROFILE") or os.environ.get("ANGELBOT_RUNTIME"):
+        return
+    if any((C.ROOT / "runtime" / a).is_dir() for a in ("paper", "live")):
+        sys.exit(f"No area given, so '{cmd}' would not reach the running bot. Use: ./deploy/ab paper {cmd}  (or live)")
+
+
 def cmd_control(args, cfg):
+    _no_area_guard(args.cmd)
     if args.cmd == "status":
         print(json.dumps(control.read_status(), indent=2, default=str))
         print("control:", control.read_control())
@@ -352,6 +368,9 @@ def main(argv=None):
         sub.add_parser(c)
 
     args = ap.parse_args(argv)
+    if args.cmd in ("run", "screen", "status") and not os.environ.get("ANGELBOT_PROFILE") and not args.__dict__.get("replay"):
+        print("note: ANGELBOT_PROFILE is not set, so this uses the legacy runtime/ folder. "
+              "Use ./deploy/ab <paper|live|research> ... to pick an area.", file=sys.stderr)
     cfg = C.load_config(Path(args.config) if args.config else None)
     handlers = {"check": cmd_check, "run": cmd_run, "fetch": cmd_fetch, "backtest": cmd_backtest,
                 "instruments": cmd_instruments, "sample-data": cmd_sample, "screen": cmd_screen,

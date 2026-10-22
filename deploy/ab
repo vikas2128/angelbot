@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Run a bot command inside ONE area, so it reads and writes only that area's files and uses only its Telegram bot.
+#   ./deploy/ab paper status          ./deploy/ab paper screen
+#   ./deploy/ab research run --replay data/candles/SBIN-EQ_ONE_MINUTE.csv
+#   ./deploy/ab live status           (live is read-only here unless you have set it up yourself)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+area="${1:-}"
+if [[ -z "$area" ]]; then echo "usage: deploy/ab <paper|live|research> <bot.cli arguments>" >&2; exit 2; fi
+shift
+case "$area" in paper|live|research) ;; *) echo "unknown area '$area' (use paper, live or research)" >&2; exit 2;; esac
+env_file="profiles/$area.env"
+if [[ ! -f "$env_file" ]]; then
+  echo "missing $env_file: copy profiles/$area.env.example and fill it in" >&2
+  exit 2
+fi
+set -a
+# shellcheck disable=SC1090
+source "$env_file"
+set +a
+mkdir -p "$ANGELBOT_RUNTIME"
+exec ./.venv/bin/python -m bot.cli "$@"

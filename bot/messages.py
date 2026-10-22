@@ -55,7 +55,7 @@ def shares(n) -> str:
 def mode_tag(mode) -> str:
     if mode == "live":
         return "🔴 <b>LIVE</b> (real money)"
-    return "🧪 <b>TEST</b> (paper trading, no real money)"
+    return "📝 <b>PAPER</b> (real prices, simulated orders, no real money)"
 
 
 def exit_reason(reason: str | None) -> str:
@@ -288,3 +288,12 @@ def selection_decided(symbols: list[str], source: str, note: str) -> str:
     if not symbols:
         return f"\u26d4 <b>No trading today</b>\n{esc(note)}"
     return f"\u2705 <b>Trading today: {esc(', '.join(symbols))}</b>\n{esc(who)}: {esc(note)}."
+
+
+def replay_summary(days: int, net: float, trades: int, worst_day: float | None = None) -> str:
+    lines = ["\U0001F9EA <b>Replay finished</b>", f"{days} day{'' if days == 1 else 's'} replayed from saved candles, {trades} trades",
+             f"Net result <b>{money(net)}</b> after fees"]
+    if worst_day is not None:
+        lines.append(f"Worst day {money(worst_day)}")
+    lines.append("Saved candles only: this says nothing about live trading.")
+    return "\n".join(lines)
