@@ -6,6 +6,7 @@
   python -m bot.cli fetch SBIN-EQ --days 60   # download 1-min candles to data/candles/
   python -m bot.cli backtest SBIN-EQ --from 2026-08-01 --to 2026-10-15 [--strategy orb --params '{"range_minutes":30}']
   python -m bot.cli instruments RELIANCE [--exchange NSE]
+  python -m bot.cli screen [--top 3] [--universe SBIN-EQ,TCS-EQ] [--html out.html]   # rank stocks (advisory, read-only)
   python -m bot.cli status | pause | resume | kill | unkill
   python -m bot.cli sample-data SBIN-EQ       # synthetic candles for offline testing ONLY
 """
@@ -193,6 +194,52 @@ def cmd_backtest(args, cfg):
     print(json.dumps(res, indent=2))
 
 
+def cmd_screen(args, cfg):
+    """Rank a universe of stocks (advisory). Reads market data only, then writes runtime/screen.json."""
+    from bot import screen_data, screener
+    from bot.instruments import load_master, resolve
+    from bot.screen_report import render_html
+
+    st = control.read_status()
+    if st.get("bot_alive") and not st.get("replay") and not args.force:
+        sys.exit("The bot is running right now. A second broker login during a session may disturb it. "
+                 "Run this before 09:00 or after the session ends, or pass --force if you accept that risk.")
+    p = screener.params_from(cfg)
+    if args.top:
+        p["top_n"] = args.top
+    symbols = ([s.strip() for s in args.universe.split(",") if s.strip()] if args.universe
+               else list((cfg.get("screener") or {}).get("universe") or screener.DEFAULT_UNIVERSE))
+    master, insts, errors = load_master(), [], []
+    for sym in symbols:
+        try:
+            insts.append(resolve([{"symbol": sym, "exchange": "NSE", "qty": 1}], master)[0])
+        except ValueError:
+            errors.append(f"{sym}: not found in the instrument master")
+    if not insts:
+        sys.exit("no stocks to screen: " + "; ".join(errors))
+    broker = _live_broker(cfg)
+    try:
+        raws, errs = screen_data.collect(broker, insts, now_ist(), int(p["lookback_days"]))
+    finally:
+        broker.logout()
+    snap = screener.rank(raws, p, cfg.get("charges", {}), now_ist(), errors + errs)
+    control.write_screen(snap)
+    print(f"screened {snap['universe']} stocks, {snap['eligible']} passed the gates  ({snap['market_date']})")
+    for r in snap["rows"]:
+        if r["excluded"]:
+            print(f"  --  {r['symbol']:<14} left out: {'; '.join(r['excluded'])}")
+        else:
+            flag = "*" if r["symbol"] in snap["picks"] else " "
+            print(f" {flag}{r['rank']:>2}  {r['symbol']:<14} score {r['score']:>5.1f}  gap {r['gap_pct'] if r['gap_pct'] is not None else '-':>5}  "
+                  f"room {r['range_to_cost']}x  vol {r['vol_pct_of_avg']}%  | {'; '.join(r['why'])}")
+    for e in snap["errors"]:
+        print("  problem:", e)
+    if args.html:
+        Path(args.html).write_text(render_html(snap))
+        print("report ->", args.html)
+    print("(advisory only: the bot still trades just the instruments in config.yaml)")
+
+
 def cmd_instruments(args, cfg):
     from bot.instruments import load_master, search
     for r in search(load_master(), args.query, args.exchange, args.limit):
@@ -272,6 +319,11 @@ def main(argv=None):
     i = sub.add_parser("instruments")
     i.add_argument("query"); i.add_argument("--exchange"); i.add_argument("--limit", type=int, default=25)
 
+    sc = sub.add_parser("screen")
+    sc.add_argument("--top", type=int); sc.add_argument("--universe", help="comma-separated symbols, e.g. SBIN-EQ,TCS-EQ")
+    sc.add_argument("--html", help="also write the standalone HTML report here")
+    sc.add_argument("--force", action="store_true", help="run even while the bot is running (second login!)")
+
     s = sub.add_parser("sample-data")
     s.add_argument("symbol"); s.add_argument("--days", type=int, default=20)
     s.add_argument("--start-price", type=float, default=800.0); s.add_argument("--seed", type=int, default=7)
@@ -284,7 +336,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     cfg = C.load_config(Path(args.config) if args.config else None)
     handlers = {"check": cmd_check, "run": cmd_run, "fetch": cmd_fetch, "backtest": cmd_backtest,
-                "instruments": cmd_instruments, "sample-data": cmd_sample,
+                "instruments": cmd_instruments, "sample-data": cmd_sample, "screen": cmd_screen,
                 "telegram-test": cmd_telegram_test}
     rc = handlers.get(args.cmd, cmd_control)(args, cfg)
     sys.exit(rc or 0)

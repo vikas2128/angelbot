@@ -159,6 +159,16 @@ class LiveBroker:
         d = self._call(self.api.ltpData, inst.exchange, inst.symbol, inst.token)
         return float(d["data"]["ltp"])
 
+    def quotes(self, exchange_tokens: dict[str, list[str]], mode: str = "FULL") -> dict[str, dict]:
+        """Batched market quotes (read-only; SmartAPI allows up to 50 tokens a call). Returns {token: quote}."""
+        out: dict[str, dict] = {}
+        for exch, tokens in exchange_tokens.items():
+            for i in range(0, len(tokens), 50):
+                resp = self._call(self.api.getMarketData, mode, {exch: tokens[i:i + 50]})
+                for q in ((resp or {}).get("data") or {}).get("fetched") or []:
+                    out[str(q.get("symbolToken"))] = q
+        return out
+
     def candles(self, inst: Instrument, interval: str, start: datetime, end: datetime) -> list[list]:
         params = {
             "exchange": inst.exchange,

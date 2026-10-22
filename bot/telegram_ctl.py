@@ -28,6 +28,7 @@ import requests
 from bot import config as C
 from bot import control, notify
 from bot import messages as M
+from bot import screen_report as SR
 from bot.journal import query_readonly
 from bot.timeutil import now_ist
 
@@ -41,6 +42,7 @@ HELP = (
     "/pause - stop new trades (open ones stay protected)\n"
     "/resume - allow new trades again\n"
     "/kill - close everything and stop (asks to confirm)\n"
+    "/screen - stock screener: top picks plus the full ranking as a file (advisory only)\n"
     "/report - send the performance report as a file (optional: all|session|replay and a start date YYYY-MM-DD)\n"
     "/log - last 20 log lines\n"
     "/menu - show buttons\n"
@@ -51,7 +53,7 @@ KILL_TTL_SEC = 60          # a "Yes, stop everything" button works for one minut
 
 COMMANDS = [("status", "Status and open position"), ("pnl", "Today's trades and result"),
             ("pause", "Stop new trades"), ("resume", "Allow new trades"),
-            ("report", "Send the performance report"),
+            ("screen", "Stock screener (advisory)"), ("report", "Send the performance report"),
             ("kill", "Emergency stop"), ("log", "Recent log lines"), ("menu", "Show buttons")]
 
 REPORT_SKILL = C.ROOT / "skills" / "angelbot-report" / "build_report.py"
@@ -64,7 +66,8 @@ def _btn(text: str, data: str) -> dict:
 def main_menu() -> list[list[dict]]:
     return [[_btn("📊 Status", "status"), _btn("💰 Today", "summary")],
             [_btn("⏸ Pause", "pause"), _btn("▶️ Resume", "resume")],
-            [_btn("📄 Report", "report"), _btn("🛑 Emergency stop", "kill_ask")]]
+            [_btn("🔎 Screener", "screen"), _btn("📄 Report", "report")],
+            [_btn("🛑 Emergency stop", "kill_ask")]]
 
 
 def _refresh_row() -> list[list[dict]]:
@@ -167,6 +170,20 @@ def build_report_file(arg: str, out_dir: Path) -> tuple[Path, str]:
     return out, caption.strip()
 
 
+def build_screen_file(out_dir: Path) -> tuple[Path, str]:
+    """HTML page and short message from the latest screener snapshot (runtime/screen.json). Read-only: no broker calls.
+
+    Raises ValueError with a message that is safe to show when there is no snapshot yet.
+    """
+    snap = control.read_screen()
+    if not snap or "rows" not in snap:
+        raise ValueError("No screener snapshot yet. On the VM, before 09:00 or after the session, run "
+                         "python -m bot.cli screen")
+    path = out_dir / f"angelbot-screener-{snap.get('market_date', 'latest')}.html"
+    path.write_text(SR.render_html(snap))
+    return path, SR.summary_html(snap, now_ist().strftime("%Y-%m-%d"))
+
+
 def kill_ask() -> tuple[str, list[list[dict]]]:
     text = ("⚠️ <b>Emergency stop</b>\nThis cancels waiting entries, closes ALL positions and stops the bot.\n"
             "Tap the button below within a minute, or send /kill CONFIRM.")
@@ -197,6 +214,8 @@ def route(text: str) -> tuple[str, list[list[dict]] | None]:
         return cmd_log(), None
     if cmd == "/report":                        # the controller sends the file; this is only a fallback text
         return "📄 Building the report…", None
+    if cmd == "/screen":
+        return "🔎 Building the screener…", None
     if cmd == "/pause":
         control.set_control(paused=True, note="telegram pause")
         return "⏸ <b>Paused</b>: no new trades. Open positions keep their safety exit, goal and market-close exit.", main_menu()
@@ -296,6 +315,18 @@ class TelegramController:
             log.exception("report error")
             self.send("📄 Couldn't build the report: " + html.escape(str(e)))
 
+    def send_screen(self) -> None:
+        """Send the latest screener snapshot as a message plus the full ranking as a file. Read-only."""
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path, text = build_screen_file(Path(tmp))
+                self.send_document(path, text)
+        except ValueError as e:
+            self.send("🔎 " + html.escape(str(e)))
+        except Exception as e:
+            log.exception("screen error")
+            self.send("🔎 Couldn't build the screener: " + html.escape(str(e)))
+
     def edit(self, message_id: int, text: str, markup=None) -> None:
         """Update the message the button was on, so the chat stays tidy."""
         params = {"chat_id": self.chat_id, "message_id": message_id, "text": text[:3900],
@@ -325,6 +356,9 @@ class TelegramController:
         if data == "report":                                # a file can't replace the message: send it as a new one
             self.send_report()
             return
+        if data == "screen":
+            self.send_screen()
+            return
         try:
             text, markup = callback(data)
         except Exception as e:
@@ -352,6 +386,9 @@ class TelegramController:
             words = text.strip().split()
             if words and words[0].split("@")[0].lower() == "/report":
                 self.send_report(" ".join(words[1:]))
+                continue
+            if words and words[0].split("@")[0].lower() == "/screen":
+                self.send_screen()
                 continue
             try:
                 reply, markup = route(text)

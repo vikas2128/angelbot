@@ -17,6 +17,7 @@ from bot.timeutil import now_ist
 CONTROL = RUNTIME_DIR / "control.json"
 STATUS = RUNTIME_DIR / "status.json"
 JOURNAL = RUNTIME_DIR / "journal.db"
+SCREEN = RUNTIME_DIR / "screen.json"
 LOG = RUNTIME_DIR / "bot.log"
 
 
@@ -56,6 +57,14 @@ def set_control(paused: bool | None = None, kill: bool | None = None, note: str 
 def write_status(status: dict) -> None:
     status["written_at"] = now_ist().isoformat()
     _atomic_write(STATUS, status)
+
+
+def write_screen(snapshot: dict) -> None:
+    _atomic_write(SCREEN, snapshot)
+
+
+def read_screen() -> dict:
+    return read_json(SCREEN)
 
 
 def read_status() -> dict:

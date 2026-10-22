@@ -130,10 +130,28 @@ Alerts come from the trading bot; commands are handled by the separate always-on
 `angelbot-telegram` service and are accepted **only from your chat id**:
 `/status` `/pnl` `/pause` `/resume` `/kill` (→ `/kill CONFIRM`) `/log` `/help`, and
 `/report [all|session|replay] [YYYY-MM-DD]`, which builds the standalone two-tab HTML report (Today and Month) from the
-journal and sends it to your chat as a file (read-only; see `skills/angelbot-report/`).
+journal and sends it to your chat as a file (read-only; see `skills/angelbot-report/`), and
+`/screen`, which sends the latest stock-screener ranking (see below).
 No order placement and no paper→live switching via Telegram, by design. Commands sent while
 the service was down are discarded on restart (so a stale `/kill` can't fire later).
 Never share the bot token — if leaked, `/revoke` it in BotFather.
+
+### Stock screener (advisory)
+
+`python -m bot.cli screen [--top 3] [--universe SBIN-EQ,TCS-EQ] [--html out.html]` ranks a universe of liquid stocks
+(default list in `bot/screener.py`, or `screener.universe` in config) and writes `runtime/screen.json`. It reads
+market data only (daily candles and one batched quote call) and **never places orders or changes what the bot
+trades**: the bot still trades only the instruments in `config/config.yaml`.
+
+- **Gates** (a stock failing any is left out, with the reason): average traded value, bid-ask spread, daily range
+  versus round-trip fees at the planned order size, and enough daily history.
+- **Score** (0 to 100) among the stocks that pass: room to move versus fees, today's gap, how much of a normal day's
+  volume has traded so far, and liquidity. A missing factor is left out, never guessed.
+- Run it **before 09:00 or after the session**. It logs in to SmartAPI separately; the command refuses while the bot
+  is running unless you pass `--force`, because a second login during a session has not been tested.
+- `/screen` in Telegram sends the top picks plus the full ranking as a standalone HTML file from the latest snapshot
+  (no broker calls). Optional `screener:` keys in config (`order_value`, `top_n`, gate limits, `weights`) override the defaults.
+- The ranking is a heuristic and has **not been backtested**. Use it to shortlist stocks to test; do not treat it as a signal.
 
 ## 7. Going live (manual, human-only)
 

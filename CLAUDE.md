@@ -25,6 +25,7 @@ code — never place orders yourself.
 bot/engine.py        event loop: ticks → bars → strategy → risk → orders; stops, limits, control
 bot/strategies/      ema_cross, orb, vwap_revert  (add new ones + register in __init__.py)
 bot/risk.py          entry gates, daily loss/profit halts, cooldown, order throttle
+bot/screener.py      advisory stock ranking (pure logic); screen_data.py / screen_report.py: data + HTML (never trades)
 bot/orders.py        LIMIT orders, fill tracking, exit chasing, positions, P&L
 bot/broker.py        SmartAPI live adapter       bot/paper.py   paper broker (same interface)
 bot/feed.py          WebSocket V2 feed + replay   bot/backtest.py bar-based backtester

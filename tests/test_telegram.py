@@ -220,3 +220,52 @@ def test_send_report_reports_problems_in_chat(monkeypatch):
     monkeypatch.setattr("bot.telegram_ctl.build_report_file", lambda arg, out: (_ for _ in ()).throw(RuntimeError("boom")))
     t.send_report("")
     assert "Couldn't build the report" in sent[-1]
+
+
+def _write_snapshot(tmp_path, monkeypatch, day="2026-10-22"):
+    from bot import screener
+    import test_screener as ts
+    monkeypatch.setattr(control, "SCREEN", tmp_path / "screen.json")
+    now = datetime.fromisoformat(f"{day} 09:17").replace(tzinfo=IST)
+    rows = [ts.raw("HOT", open=1025.0, volume=900_000), ts.raw("MID", open=1008.0, volume=300_000)]
+    control.write_screen(screener.rank(rows, screener.params_from(None), ts.CHARGES, now))
+
+
+def test_screen_file_from_the_latest_snapshot(tmp_path, monkeypatch):
+    from bot.telegram_ctl import build_screen_file
+    monkeypatch.setattr(control, "SCREEN", tmp_path / "none.json")
+    with pytest.raises(ValueError, match="No screener snapshot"):
+        build_screen_file(tmp_path)
+    _write_snapshot(tmp_path, monkeypatch)
+    monkeypatch.setattr("bot.telegram_ctl.now_ist", lambda: datetime.fromisoformat("2026-10-22 09:30").replace(tzinfo=IST))
+    out = tmp_path / "out"; out.mkdir()
+    path, text = build_screen_file(out)
+    assert path.name == "angelbot-screener-2026-10-22.html" and "Stock screener" in path.read_text()
+    assert "HOT" in text and "Advisory only" in text and "not today" not in text
+    monkeypatch.setattr("bot.telegram_ctl.now_ist", lambda: datetime.fromisoformat("2026-10-23 09:30").replace(tzinfo=IST))
+    assert "not today" in build_screen_file(out)[1]
+
+
+def test_screen_command_and_button_only_for_the_authorised_chat(monkeypatch):
+    t = TelegramController("TOKEN", "111")
+    asked = []
+    updates = [{"update_id": 1, "message": {"chat": {"id": 999}, "text": "/screen"}},
+               {"update_id": 2, "message": {"chat": {"id": 111}, "text": "/screen@AngelBot_bot"}}]
+    monkeypatch.setattr(t, "_api", lambda method, **p: updates if method == "getUpdates" else None)
+    monkeypatch.setattr(t, "send_screen", lambda: asked.append("cmd"))
+    monkeypatch.setattr(t, "send", lambda text, markup=None: None)
+    t.poll_once()
+    t._handle_callback({"id": "1", "data": "screen", "message": {"message_id": 3, "chat": {"id": 999}}})
+    t._handle_callback({"id": "2", "data": "screen", "message": {"message_id": 3, "chat": {"id": 111}}})
+    assert asked == ["cmd", "cmd"]
+    assert any(b["callback_data"] == "screen" for row in route("/menu")[1] for b in row)
+    assert "/screen" in handle("/help")
+
+
+def test_send_screen_reports_a_missing_snapshot_in_chat(tmp_path, monkeypatch):
+    monkeypatch.setattr(control, "SCREEN", tmp_path / "none.json")
+    t = TelegramController("TOKEN", "111")
+    sent = []
+    monkeypatch.setattr(t, "send", lambda text, markup=None: sent.append(text))
+    t.send_screen()
+    assert sent and "No screener snapshot yet" in sent[0] and "bot.cli screen" in sent[0]
