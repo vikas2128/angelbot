@@ -236,3 +236,24 @@ def test_claude_cannot_start_the_live_services():
                 "enable --now angelbot-telegram@live", "start angelbot-telegram@live"):
         assert f"Bash(systemctl --user {cmd}:*)" in deny, cmd
     assert "Bash(./deploy/ab live run:*)" in deny
+
+
+def test_bare_screen_and_run_are_refused_once_the_areas_exist(tmp_path, monkeypatch, cfg):
+    """A bare `bot.cli screen` would write its snapshot where the Paper bot never looks; a bare `run` would use the old folder."""
+    monkeypatch.delenv("ANGELBOT_RUNTIME", raising=False)
+    monkeypatch.delenv("ANGELBOT_PROFILE", raising=False)
+    monkeypatch.setattr(C, "ROOT", tmp_path)
+    (tmp_path / "runtime" / "paper").mkdir(parents=True)
+    with pytest.raises(SystemExit, match="./deploy/ab paper screen"):
+        cli.cmd_screen(argparse.Namespace(force=False, universe=None, top=None, html=None), cfg)
+    with pytest.raises(SystemExit, match="./deploy/ab paper run"):
+        cli.cmd_run(argparse.Namespace(replay=None, journal=None, master=None), cfg)
+    assert not (tmp_path / "runtime" / "journal.db").exists()                  # nothing was created in the old place
+
+
+def test_the_snapshot_hint_names_the_area(tmp_path, monkeypatch):
+    from bot.telegram_ctl import build_screen_file
+    monkeypatch.setattr(control, "SCREEN", tmp_path / "none.json")
+    monkeypatch.setenv("ANGELBOT_PROFILE", "live")
+    with pytest.raises(ValueError, match=r"\./deploy/ab live screen"):
+        build_screen_file(tmp_path)

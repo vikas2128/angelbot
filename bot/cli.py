@@ -99,6 +99,8 @@ def _select_instruments(cfg, broker, insts, log):
 
 
 def cmd_run(args, cfg):
+    if not args.replay:
+        _no_area_guard("run")              # systemd sets the area; a bare run by hand must not write to the old folder
     from bot.engine import Engine
     from bot.feed import LiveFeed, ReplayFeed
     from bot.journal import Journal
@@ -227,6 +229,7 @@ def cmd_screen(args, cfg):
     from bot.instruments import load_master
     from bot.screen_report import render_html
 
+    _no_area_guard("screen")                # the snapshot must land in an area's folder, where its Telegram bot reads it
     st = control.read_status()
     if st.get("bot_alive") and not st.get("replay") and not args.force:
         sys.exit("The bot is running right now. A second broker login during a session may disturb it. "
@@ -307,12 +310,13 @@ def cmd_telegram_test(args, cfg):
 
 
 def _no_area_guard(cmd: str) -> None:
-    """After the areas exist (runtime/paper or runtime/live), a bare pause/kill would write to the old runtime/ folder
-    and silently not reach the running bot. Refuse and say how to address the right area."""
+    """After the areas exist (runtime/paper or runtime/live), a bare command would read and write the old runtime/ folder
+    instead of an area's files (a bare kill would silently miss the running bot). Refuse and say how to pick the area."""
     if os.environ.get("ANGELBOT_PROFILE") or os.environ.get("ANGELBOT_RUNTIME"):
         return
     if any((C.ROOT / "runtime" / a).is_dir() for a in ("paper", "live")):
-        sys.exit(f"No area given, so '{cmd}' would not reach the running bot. Use: ./deploy/ab paper {cmd}  (or live)")
+        sys.exit(f"No area given, so '{cmd}' would use the old runtime/ folder, not an area's files. "
+                 f"Use: ./deploy/ab paper {cmd}  (or live)")
 
 
 def cmd_control(args, cfg):

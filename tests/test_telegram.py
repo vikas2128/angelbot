@@ -268,7 +268,7 @@ def test_send_screen_reports_a_missing_snapshot_in_chat(tmp_path, monkeypatch):
     sent = []
     monkeypatch.setattr(t, "send", lambda text, markup=None: sent.append(text))
     t.send_screen()
-    assert sent and "No screener snapshot yet" in sent[0] and "bot.cli screen" in sent[0]
+    assert sent and "No screener snapshot yet" in sent[0] and "./deploy/ab paper screen" in sent[0]
 
 
 def _request(tmp_path, monkeypatch, phase="waiting", day="2026-10-22"):

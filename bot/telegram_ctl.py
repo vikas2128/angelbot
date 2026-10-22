@@ -178,7 +178,7 @@ def build_screen_file(out_dir: Path) -> tuple[Path, str]:
     snap = control.read_screen()
     if not snap or "rows" not in snap:
         raise ValueError("No screener snapshot yet. On the VM, before 09:00 or after the session, run "
-                         "python -m bot.cli screen")
+                         f"./deploy/ab {os.environ.get('ANGELBOT_PROFILE') or 'paper'} screen")
     path = out_dir / f"angelbot-screener-{snap.get('market_date', 'latest')}.html"
     path.write_text(SR.render_html(snap))
     return path, SR.summary_html(snap, now_ist().strftime("%Y-%m-%d"))
