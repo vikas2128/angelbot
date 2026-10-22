@@ -2,248 +2,440 @@
 
 ```
             Oracle Cloud VM (Mumbai/Hyderabad, reserved static IP)
- ┌──────────────────────────────────────────────────────────────────────┐
- │  systemd timer 09:05 IST Mon–Fri ─▶ angelbot@paper.service (python -m bot.cli run)
- │                                                                      │
- │  SmartAPI WebSocket ─ticks─▶ BarBuilder ─▶ Strategy ─▶ RiskManager    │
- │                                   │                       │          │
- │        stops/targets on every tick│              OrderManager (LIMIT) │──▶ SmartAPI REST
- │                                   ▼                       ▼          │    (live) or
- │      runtime/status.json   runtime/journal.db   runtime/bot.log       │    PaperBroker
- │              ▲   control.json (pause/kill)                           │
- │              │                                                       │
- │  Claude Code CLI ──stdio──▶ mcp_server (angelbot) : status, trades,   │
- │   (you, over SSH)            journal SQL, logs, backtests, sweeps,    │
- │                              pause / resume / kill-switch             │
- └──────────────────────────────────────────────────────────────────────┘
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │  systemd timer 09:05 IST Mon–Fri ─▶ angelbot@paper.service (bot.cli run)  │
+ │                                                                          │
+ │  SmartAPI WebSocket ─ticks─▶ BarBuilder ─▶ Strategy ─▶ RiskManager        │
+ │                                   │                       │              │
+ │        stops/targets on every tick│              OrderManager (LIMIT) ───┼──▶ SmartAPI REST (live)
+ │                                   ▼                       ▼              │    or PaperBroker
+ │   runtime/paper/: status.json  journal.db  bot.log  control.json  screen.json
+ │                                                                          │
+ │  angelbot-telegram@paper (always on) ◀──▶ your Paper Telegram bot        │
+ │  Claude Code ──stdio──▶ mcp_server (angelbot): status, trades, SQL,      │
+ │                         logs, backtests, sweeps, pause / resume / kill   │
+ └──────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Who decides what**
-- The **coded strategy + risk rules** make every real-time trading decision (milliseconds, deterministic).
-- **Claude Code** is your analyst/operator: health checks, end-of-day reviews, backtests,
-  walk-forward tuning, writing new strategies, debugging. It **cannot place orders** and
-  **cannot switch to live** — by design.
+- The **coded strategy + risk rules** make every real-time trading decision (deterministic, in milliseconds).
+- **Claude Code** is your analyst and operator: health checks, end-of-day reviews, reports, backtests, walk-forward
+  tuning, new strategies, debugging. It **cannot place orders** and **cannot switch to live**, by design.
 
-**Safety defaults:** paper mode · LIMIT orders only · ≤ 3 orders/sec · stop-loss on every
-trade · daily loss limit → flatten + halt · consecutive-loss cooldown · entry window
-09:20–15:00 · auto square-off 15:12 · kill switch · crash-restart adopts open positions.
+**Safety defaults:** paper mode · LIMIT orders only · ≤ 3 orders/sec · stop loss on every trade · daily loss limit →
+flatten + halt · consecutive-loss cooldown · entry window 09:20–15:00 · auto square-off 15:12 · kill switch ·
+crash-restart adopts open positions.
 
 ---
 
-## 1. Create the OCI VM
+## 1. Profiles (areas): what each one is for
 
-1. Sign up at cloud.oracle.com → choose **India West (Mumbai)** or **India South (Hyderabad)** as
-   the **home region** (Always Free resources only exist there; you can't change it later).
-   Upgrading the account to **Pay As You Go** stops Oracle reclaiming "idle" free VMs — you still
-   pay ₹0 inside Always Free limits. Set a budget alert anyway.
+The bot runs in separate **areas**. Each has its own folder, its own Telegram bot and its own services, so a command, a
+button tap or a report in one area can never touch another. Details and the migration from the old single folder:
+[docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md).
+
+| Profile | Purpose | Files | Mode | Telegram bot | Broker login | How it runs |
+|---|---|---|---|---|---|---|
+| **paper** | Daily practice on **real market prices with simulated orders**. No real money. This is the one running now. | `runtime/paper/` | pinned to `paper` | Paper bot | yes | `angelbot@paper` (weekday timer) + `angelbot-telegram@paper` |
+| **live** | **Real money.** Prepared but **OFF**: installed, never enabled by the setup. Only you switch it on, after the paper phase. | `runtime/live/` | you set it | Live bot | yes | `angelbot@live` + `angelbot-telegram@live` (both off) |
+| **research** | Offline replays, backtests and sample data. Never places orders. | `runtime/research/` | paper, no broker | Test bot | no | by hand: `./deploy/ab research ...` |
+| **test** | The unit tests (`pytest`). Uses a temporary folder. | temp folder | paper | Test bot (optional) | no | `pytest` |
+
+- Shared by all areas: broker credentials in `.env`, market candles and stock lists in `data/`, and the code.
+- Per area: `profiles/<area>.env` sets `ANGELBOT_PROFILE`, `ANGELBOT_MODE`, `ANGELBOT_RUNTIME` (its folder),
+  `ANGELBOT_CONFIG` (its config file), and `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` (its Telegram bot).
+- `paper.env` pins `ANGELBOT_MODE=paper`, so the paper services can never trade live, whatever `.env` says.
+- Config: paper and research use `config/config.yaml`; live uses `config/config.live.yaml` (you create it, with
+  stricter risk limits).
+- Alerts are labelled `📝 PAPER`, `🔴 LIVE` or `🧪 TEST`. A replay sends one summary to the Test bot, not one message per trade.
+
+**Always run manual commands through the area wrapper** `./deploy/ab <area> <command>`. It loads that area's profile, so
+the command reads and writes only that area's files. A bare `python -m bot.cli pause|kill|resume|unkill|screen|run` is
+refused once the areas exist, because it would miss the running bot.
+
+```bash
+./deploy/ab paper status                  # = python -m bot.cli status, inside the paper area
+./deploy/ab paper pause
+./deploy/ab research run --replay data/candles/SBIN-EQ_ONE_MINUTE.csv
+```
+
+---
+
+## 2. Setup
+
+### 2.1 Create the OCI VM
+
+1. Sign up at cloud.oracle.com and choose **India West (Mumbai)** or **India South (Hyderabad)** as the **home region**
+   (Always Free resources exist only there, and it can't be changed later). Upgrading to **Pay As You Go** stops Oracle
+   reclaiming idle free VMs; you still pay ₹0 inside the Always Free limits. Set a budget alert anyway.
 2. **Compute → Instances → Create**
    - Image: **Canonical Ubuntu 22.04 or 24.04**
-   - Shape: **VM.Standard.A1.Flex** (Ampere, 1 OCPU / 6 GB is plenty) — or **VM.Standard.E2.1.Micro**
-     if A1 says "out of capacity" (setup adds swap for the 1 GB micro).
-   - Networking: public subnet, assign a public IPv4 (you'll swap it for a reserved one next).
-   - Add your SSH public key. Create.
-3. **Reserve a static IP** (SmartAPI orders are only accepted from your registered IP):
-   Networking → **IP Management → Reserved public IPs → Reserve**. Then Instance → Attached VNICs →
-   VNIC → IPv4 Addresses → ⋯ on the primary private IP → **Edit** → *No public IP* → Update →
-   **Edit** again → *Reserved public IP* → pick yours. Note the IP.
+   - Shape: **VM.Standard.A1.Flex** (1 OCPU / 6 GB is plenty), or **VM.Standard.E2.1.Micro** if A1 is out of capacity
+     (the setup adds swap for the 1 GB micro).
+   - Networking: public subnet with a public IPv4 (swapped for a reserved one next). Add your SSH public key.
+3. **Reserve a static IP** (SmartAPI accepts orders only from your registered IP): Networking → **IP Management →
+   Reserved public IPs → Reserve**. Then Instance → Attached VNICs → VNIC → IPv4 Addresses → ⋯ on the primary private IP
+   → **Edit** → *No public IP* → Update → **Edit** again → *Reserved public IP* → pick yours.
 4. Security list: keep only **ingress TCP 22** (from your IP if possible). The bot needs no inbound ports.
+   Hardening steps: [docs/HARDENING.md](docs/HARDENING.md).
 
-## 2. Install
+### 2.2 Install
 
 ```bash
-# from your laptop
-scp -r angelbot ubuntu@<RESERVED_IP>:~/          # or git clone your private repo into ~/angelbot
 ssh ubuntu@<RESERVED_IP>
-cd ~/angelbot && bash deploy/setup_oci.sh        # packages, IST timezone, venv, tests, systemd timer, Claude Code
+git clone <your private repo> ~/angelbot
+cd ~/angelbot && bash deploy/setup_oci.sh
 ```
 
-## 3. SmartAPI credentials + static IP
+The setup installs packages, sets the IST timezone and time sync, creates `.venv`, runs the tests, copies
+`.env.example` → `.env` and `profiles/*.env.example` → `profiles/*.env` if missing, installs the systemd units, and
+enables **only the paper area** (`angelbot@paper.timer` and `angelbot-telegram@paper`). Live is installed as a template
+but never enabled or started.
 
-1. smartapi.angelone.in → **My Apps → Create App** (Trading API) → copy the **API key**.
-   Register the VM's **reserved IP** as the app's **primary static IP** (you can change it at most
-   once a week, and one IP can belong to only one client).
-2. Enable **TOTP** for your Angel One account and copy the **base32 secret** (text under the QR).
-3. `nano .env` → fill `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PIN`, `ANGEL_TOTP_SECRET`. Paper, live, research and test are
-   separate areas with their own files and Telegram bots: see `docs/ENVIRONMENTS.md`.
-   Leave `ANGELBOT_MODE=paper`. Optional: Telegram bot token + chat id for alerts.
-4. Verify:
+### 2.3 Broker credentials (`.env`, shared)
+
+1. smartapi.angelone.in → **My Apps → Create App** (Trading API) → copy the **API key**. Register the VM's **reserved IP**
+   as the app's **primary static IP** (changeable at most once a week; one IP belongs to one client only).
+2. Enable **TOTP** on your Angel One account and copy the **base32 secret** (the text under the QR code).
+3. Fill in `.env` yourself:
    ```bash
-   ./.venv/bin/python -m bot.cli check
-   # ✓ config valid · public IP (must equal your registered static IP) · login OK · funds · LTP
+   nano .env            # ANGEL_API_KEY, ANGEL_CLIENT_CODE, ANGEL_PIN, ANGEL_TOTP_SECRET; leave ANGELBOT_MODE=paper
+   chmod 600 .env
    ```
 
-## 4. Data → backtest → offline replay
+### 2.4 Telegram bots (one per area)
+
+1. In Telegram, open **@BotFather** → `/newbot` three times: **Paper**, **Live**, **Test**. Copy each token, open each
+   bot and tap **Start**. Two areas must never share a token.
+2. Your chat id: message **@userinfobot**, or `curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates"` → `"chat":{"id":…}`.
+
+### 2.5 Profile files (`profiles/<area>.env`, secret)
 
 ```bash
-./.venv/bin/python -m bot.cli instruments SBIN                 # find exact symbols/tokens
-./.venv/bin/python -m bot.cli fetch SBIN-EQ --days 90          # 1-min candles → data/candles/
-./.venv/bin/python -m bot.cli backtest SBIN-EQ --from 2026-07-01 --to 2026-09-15
-./.venv/bin/python -m bot.cli backtest SBIN-EQ --strategy orb --params '{"range_minutes":30}'
-./.venv/bin/python -m bot.cli run --replay data/candles/SBIN-EQ_ONE_MINUTE.csv   # full engine, paper, offline
+cp profiles/paper.env.example profiles/paper.env
+cp profiles/research.env.example profiles/research.env
+chmod 600 profiles/*.env
+nano profiles/paper.env       # TELEGRAM_BOT_TOKEN = Paper bot, TELEGRAM_CHAT_ID = your chat id
+nano profiles/research.env    # TELEGRAM_BOT_TOKEN = Test bot
 ```
 
-## 5. Claude Code
+The templates assume user `ubuntu` and the project in `~/angelbot` (systemd needs absolute paths); edit the paths if
+yours differ. Put comments on their own lines (systemd keeps text after a value). Leave `profiles/live.env` uncreated
+until you go live: without it the live services refuse to start.
+
+### 2.6 Verify
 
 ```bash
-ssh ubuntu@<RESERVED_IP>
-tmux new -A -s claude          # survives SSH disconnects
-cd ~/angelbot && claude        # first run: log in, then approve the project MCP server "angelbot"
+./deploy/ab paper check            # config valid · public IP = registered static IP · login OK · funds · LTP
+./deploy/ab paper telegram-test    # a test message from the Paper bot
+./.venv/bin/python -m pytest -q    # unit tests (send nothing unless ANGELBOT_TEST_TELEGRAM_* is set in your shell)
+systemctl --user list-timers 'angelbot@*' --no-pager
 ```
-Slash commands (in `.claude/commands/`):
 
-| Command | What it does |
+### 2.7 Configuration (`config/config.yaml`)
+
+Strategy and its parameters, instruments, risk limits, session times and holidays, execution and charges. The optional
+`screener:` and `selection:` sections are covered in §5 and §6.
+
+- Every change: edit → `./deploy/ab paper check` (validates the config) → backtest → it applies from the **next start**
+  (or a restart, below). With Claude Code: ask it, and it runs `validate_config` and a backtest first.
+- Update `session.holidays` every December.
+
+---
+
+## 3. Start, stop and restart
+
+The services are systemd **user** units, one instance per area (`@paper`, `@live`).
+
+| Unit | What it is |
 |---|---|
-| `/status` | health: alive, mode, P&L, positions, pending orders, feed, halts |
-| `/eod-review [date]` | trades, signals, errors, last-10-day comparison, ≤3 testable ideas |
-| `/backtest SYMBOL [strategy] [params]` | in-sample vs out-of-sample backtest table |
-| `/tune SYMBOL strategy` | small grid sweep + walk-forward; proposes YAML diff only if it holds up |
-| `/new-strategy <idea>` | implements a Strategy class + tests + backtest comparison |
-| `/preflight` | go-live readiness checklist (read-only) |
-| `/incident [what]` | root-cause errors, rejections, stuck exits, feed drops |
+| `angelbot@paper.timer` | starts the trading bot at **09:05 IST, Mon–Fri** |
+| `angelbot@paper.service` | the trading bot: one session per start; skips holidays, flattens at 15:12, exits about 15:32 |
+| `angelbot-telegram@paper.service` | Telegram commands and buttons; always on, independent of trading |
 
-Or just ask: *"Why did we lose today?"*, *"Compare ORB 15 vs 30 minutes on the last 3 months"*,
-*"Pause the bot, I'm seeing news"*.
+### Paper
 
-Guardrails (`.claude/settings.json`): read-only tools auto-allowed; pause/resume/kill, config edits,
-service restarts and candle downloads **ask you first**; `.env`, `env/printenv` and `bot/config.py`
-edits are **denied**. These are guardrails, not a security boundary (Claude runs as the same Linux
-user) — for hard isolation run the bot under a separate Linux user that owns `.env`.
+```bash
+# trading bot
+systemctl --user start angelbot@paper          # start now (exits at once on a weekend, holiday or after the session)
+systemctl --user restart angelbot@paper        # mid-session restart: open positions are re-adopted from the broker
+systemctl --user stop angelbot@paper           # stop now (prefer a pause or kill below when positions are open)
+systemctl --user status angelbot@paper
+journalctl --user -u angelbot@paper -f         # follow the log
 
-## 6. Daily operation
+# the morning timer
+systemctl --user enable --now angelbot@paper.timer
+systemctl --user disable --now angelbot@paper.timer   # no automatic start tomorrow
 
-- Timer starts the bot **09:05 IST Mon–Fri**; it skips holidays in `config.yaml`, flattens at 15:12, exits ~15:32.
-- `./deploy/ab paper status` · `journalctl --user -u angelbot@paper -f` · `systemctl --user list-timers`
-- Pause entries: `bot.cli pause` · resume: `bot.cli resume`
-- **Kill switch:** `bot.cli kill` → cancels entries, exits everything with limit orders, stops.
-  It then leaves the bot **paused** — run `bot.cli resume` before the next session.
-- Config changes apply at next start (or `systemctl --user restart angelbot@paper` — mid-session restarts
-  re-adopt open positions from the broker).
-- Update the holiday list every December.
+# Telegram controller
+systemctl --user restart angelbot-telegram@paper
+systemctl --user status angelbot-telegram@paper
+journalctl --user -u angelbot-telegram@paper -n 50 --no-pager
+```
 
-## 6b. Telegram (alerts + control)
+Trading controls (they act on the running bot through `runtime/paper/control.json`):
 
-1. @BotFather → `/newbot` → copy the token; open your bot and tap **Start**.
-2. Chat id: `curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates"` → `"chat":{"id":…}`.
-3. `profiles/paper.env`: `TELEGRAM_BOT_TOKEN=…` (the Paper bot) and `TELEGRAM_CHAT_ID=…`, then
-   `./deploy/ab paper telegram-test` and `systemctl --user restart angelbot-telegram@paper`. Each area has its own bot: see `docs/ENVIRONMENTS.md`.
+```bash
+./deploy/ab paper status
+./deploy/ab paper pause        # no new entries; open trades keep their stops
+./deploy/ab paper resume       # allow entries again; also clears a kill
+./deploy/ab paper kill         # emergency: cancel entries, exit everything with limit orders, stop (and stay paused)
+./deploy/ab paper unkill       # clear only the kill flag; the bot stays paused until resume
+```
 
-Alerts come from the trading bot; commands are handled by the separate always-on
-`angelbot-telegram@<area>` service and are accepted **only from your chat id**, and act only on that area's files:
-`/status` `/pnl` `/pause` `/resume` `/kill` (→ `/kill CONFIRM`) `/log` `/help`, and
-`/report [all|session|replay] [YYYY-MM-DD]`, which builds the standalone two-tab HTML report (Today and Month) from the
-journal and sends it to your chat as a file (read-only; see `skills/angelbot-report/`), and
-`/screen`, which sends the latest stock-screener ranking (see below).
-No order placement and no paper→live switching via Telegram, by design. Commands sent while
-the service was down are discarded on restart (so a stale `/kill` can't fire later).
-Never share the bot token — if leaked, `/revoke` it in BotFather.
+### Live (only after you have gone live yourself, §8)
 
-### Stock screener (advisory)
+The same commands with `@live` and `./deploy/ab live ...`. Until `profiles/live.env` exists they fail with
+"Failed to load environment files", which is intended. Never enable `angelbot@live.timer` before going live.
 
-`python -m bot.cli screen [--top 3] [--universe SBIN-EQ,TCS-EQ] [--html out.html]` ranks a universe of liquid stocks
-(default list in `bot/screener.py`, or `screener.universe` in config) and writes `runtime/screen.json`. It reads
-market data only (daily candles and one batched quote call) and **never places orders or changes what the bot
-trades**: the bot still trades only the instruments in `config/config.yaml`.
+### After a `git pull` (new code)
 
-- **Gates** (a stock failing any is left out, with the reason): average traded value, bid-ask spread, daily range
-  versus round-trip fees at the planned order size, and enough daily history.
+```bash
+cd ~/angelbot && git pull
+systemctl --user restart angelbot-telegram@paper   # always: it is long-running and keeps the old code otherwise
+systemctl --user daemon-reload                     # only if files in deploy/*.service or *.timer changed, after copying
+                                                   # them again: cp deploy/angelbot*@.* ~/.config/systemd/user/
+```
+
+The trading bot loads new code at its next start (tomorrow's 09:05 timer). To use it today, outside a position,
+`systemctl --user restart angelbot@paper`. Config changes work the same way.
+
+---
+
+## 4. Telegram
+
+Alerts come from the trading bot: start and morning heartbeat, trade opened and closed (with times), stuck exits,
+rejected orders, feed lost and back, loss cooldown, end-of-day summary. Commands are handled by
+`angelbot-telegram@<area>`, accepted **only from your chat id**, and act only on that area:
+
+| Command / button | What it does |
+|---|---|
+| `/status` · 📊 Status | running or not, today's result, open position |
+| `/pnl` (`/summary`) · 💰 Today | today's trades and result |
+| `/pause` · `/resume` | stop / allow new entries |
+| `/kill` · 🛑 Emergency stop | close everything and stop; asks for confirmation, valid for 60 seconds |
+| `/report [all\|session\|replay] [YYYY-MM-DD]` · 📄 Report | standalone HTML report with **Today** and **Month** tabs, sent as a file |
+| `/screen` · 🔎 Screener | latest screener picks plus the full ranking as an HTML file (no broker calls) |
+| `/log` · `/menu` · `/help` | last 20 log lines, buttons, help |
+
+No order placement and no paper → live switching through Telegram, by design. Commands sent while the controller was
+down are discarded on restart, so a stale `/kill` can't fire later. If a token leaks, `/revoke` it in BotFather.
+The report and screener files work without JavaScript; if a tab does not respond in Telegram's preview, open the file in
+your phone's browser.
+
+---
+
+## 5. Stock screener (advisory)
+
+The screener ranks liquid stocks for intraday trading and writes `runtime/<area>/screen.json` (plus an HTML page if
+asked). It reads market data only (daily candles and one batched quote call) and **never places orders**. Unless
+selection is on (§6), the bot still trades only the instruments in the config.
+
+- **Gates** (a stock failing any is left out, with the reason): average traded value ≥ ₹100 cr, bid-ask spread ≤ 0.10%,
+  daily range ≥ 5× round-trip fees at the planned order size, at least 10 days of history.
 - **Score** (0 to 100) among the stocks that pass: room to move versus fees, today's gap, how much of a normal day's
   volume has traded so far, and liquidity. A missing factor is left out, never guessed.
-- Run it **before 09:00 or after the session**. It logs in to SmartAPI separately; the command refuses while the bot
-  is running unless you pass `--force`, because a second login during a session has not been tested.
-- `/screen` in Telegram sends the top picks plus the full ranking as a standalone HTML file from the latest snapshot
-  (no broker calls). Optional `screener:` keys in config (`order_value`, `top_n`, gate limits, `weights`) override the defaults.
-- **Nifty 50 and Bank Nifty lists** (stocks only, no index futures or options): `screen --universe nifty50,banknifty` ranks the
-  members of both indices (about 59 distinct stocks, roughly a minute at one call a second), and `screener.universe: [nifty50, banknifty]`
-  in config does the same by default. The lists come from NSE's official constituent CSVs: a snapshot ships in `config/universe/`, and
-  `python -m bot.cli universe refresh` downloads fresh copies into `data/universe/` (git-ignored; a refreshed copy wins). A refresh is
-  validated and never replaces a good list with a broken one. `universe show` lists their age; a list older than about four months is
-  flagged in the screener's "Problems" section. Index membership changes at NSE's reviews, so refresh now and then.
-- The ranking is a heuristic and has **not been backtested**. Use it to shortlist stocks to test; do not treat it as a signal.
+- The ranking is a heuristic and has **not been backtested**. Use it to shortlist stocks to test, not as a signal.
 
-### Morning stock selection (opt-in, off by default)
+### Run it manually
 
-With `selection.mode: off` (the default, also when the section is absent) the bot trades exactly the instruments in
-`config.yaml`. To let the screener choose what the bot trades each day, add to `config.yaml` (needs your approval,
-then `validate_config`; it applies from the next session):
+Run it **before 09:00 or after about 15:32**, when that area's bot is not running. The screener logs in to SmartAPI on
+its own, and a second login beside a running bot has not been tested, so it refuses while the bot is alive unless you
+add `--force`. It paces calls at one a second: the Nifty 50 + Bank Nifty lists (about 59 stocks) take about a minute.
+
+**Paper**
+```bash
+./deploy/ab paper screen                                   # the universe from config (or the built-in 20 stocks)
+./deploy/ab paper screen --universe nifty50,banknifty      # members of both indices
+./deploy/ab paper screen --universe SBIN-EQ,TCS-EQ --top 3 --html runtime/paper/screen.html
+```
+Then tap 🔎 Screener (or send `/screen`) in the Paper bot.
+
+**Live** (once `profiles/live.env` and `config/config.live.yaml` exist)
+```bash
+./deploy/ab live screen --universe nifty50,banknifty
+```
+It reads the same market data and writes to `runtime/live/screen.json`, shown by the Live bot. It never trades, but
+the same rule applies: not while the live bot is running. Both areas use the same broker account, so don't screen in
+one area while the other area's bot is running either.
+
+### Nifty 50 and Bank Nifty lists
+
+Stocks only (no index futures or options). The lists come from NSE's official constituent CSVs: a snapshot ships in
+`config/universe/`, and a refresh downloads fresh copies into `data/universe/` (git-ignored, shared by all areas; a
+refreshed copy wins). A refresh is validated and never replaces a good list with a broken one. Membership changes at
+NSE's index reviews, so refresh now and then; a list older than about four months is flagged on the screener page.
+
+```bash
+./deploy/ab paper universe show          # count and age of each list
+./deploy/ab paper universe refresh       # both lists (or --name nifty50 / --name banknifty)
+```
+
+Optional `screener:` keys in the config override the defaults, for example:
+
+```yaml
+screener:
+  universe: [nifty50, banknifty]   # presets and/or symbols such as SBIN-EQ
+  top_n: 3
+  order_value: 50000               # planned order size in rupees, used by the fee gate
+```
+
+---
+
+## 6. Morning stock selection (opt-in, off by default)
+
+With `selection.mode: off` (the default, also when the section is absent) the bot trades exactly the instruments in the
+config. To let the screener choose what the bot trades each day, add this to the config (with your approval, then
+validate; it applies from the next session):
 
 ```yaml
 selection:
   mode: confirm          # off | auto | confirm
   top_n: 1               # how many of the top picks to trade (1 to 3)
   screen_at: "09:16:30"  # after the open, so today's gap exists
-  confirm_until: "09:19:30"   # must be at or before session.entry_start
-  on_timeout: config     # confirm, no tap: config (your list) | top (the top picks)
+  confirm_until: "09:19:30"   # at or before session.entry_start
+  on_timeout: config     # confirm with no tap: config (your list) | top (the top picks)
   on_failure: config     # screen failed or nothing passed: config | none (no trading today)
   qty: 1                 # shares per order for a picked stock ...
-  order_value: 0         # ... or, if > 0, shares = this many rupees // price (bigger size = bigger risk per trade)
+  order_value: 0         # ... or, if > 0, shares = this many rupees // price
 ```
 
-- **auto**: at `screen_at` the bot screens (on its own login, no second login) and trades the top `top_n` picks.
+- **auto**: at `screen_at` the bot screens on its own login (no second login) and trades the top `top_n` picks.
 - **confirm**: it sends the picks to Telegram with buttons (*Only X*, *Trade top N*, *Keep my list*) and waits until
-  `confirm_until`. Your tap applies at once; no tap follows `on_timeout`.
-- A tap can only choose a stock that passed the screener's gates in today's snapshot, and only while the bot is waiting.
-  Once it has decided, taps are refused. Trades still follow the same strategy, stops and risk limits.
+  `confirm_until`. A tap applies at once; no tap follows `on_timeout`.
+- A tap can only choose a stock that passed the gates in today's snapshot, and only while the bot is waiting.
 - The decision is saved for the day, so a restart keeps the same stocks. Any failure falls back per `on_failure`.
-- The start of trading moves to `confirm_until` at the latest; indicators warm up from the day's candles as after a mid-day restart.
-- The ranking has **not been backtested**. Run it in paper mode and compare against a fixed list before trusting it, and read
-  the risk note: bigger `order_value` raises the loss per stop against `risk.max_daily_loss`.
+- Trades still follow the same strategy, stops and risk limits. A bigger `order_value` raises the loss per stop against
+  `risk.max_daily_loss`. Run it in paper and compare against a fixed list before trusting it.
 
-## 7. Going live (manual, human-only)
+---
 
-Only after **≥ 3–4 weeks of paper trading** that roughly matches the backtest, and `/preflight` passes:
-1. Set `qty: 1` (1 share / 1 lot) and a small `risk.max_daily_loss`.
-2. Edit `.env` yourself:
+## 7. Research, backtests and reports
+
+```bash
+./deploy/ab research instruments SBIN                         # exact symbols and tokens
+./deploy/ab research fetch SBIN-EQ --days 90                   # 1-minute candles → data/candles/ (logs in for market data; not while a bot runs)
+./deploy/ab research backtest SBIN-EQ --from 2026-07-01 --to 2026-09-15
+./deploy/ab research backtest SBIN-EQ --strategy orb --params '{"range_minutes":30}'
+./deploy/ab research run --replay data/candles/SBIN-EQ_ONE_MINUTE.csv    # full engine, offline, one summary to the Test bot
+./deploy/ab research sample-data SBIN-EQ --days 20             # synthetic candles (prove nothing about returns)
+```
+
+Report for any agent or by hand (standard library only, see `skills/angelbot-report/SKILL.md`):
+
+```bash
+python3 skills/angelbot-report/build_report.py --db runtime/paper/journal.db --out report.html
+```
+
+Fewer than 100 trades, or synthetic data, prove nothing. Judge results on net P&L after charges, trade count, win
+rate, profit factor and max drawdown, and confirm tuning on a later, unseen window (walk-forward).
+
+---
+
+## 8. Claude Code
+
+On the VM:
+```bash
+tmux new -A -s claude          # survives SSH disconnects
+cd ~/angelbot && claude        # first run: log in, then approve the project MCP server "angelbot" (paper area)
+```
+
+From your laptop or Claude Desktop, the same MCP server can run over SSH; see [docs/HARDENING.md](docs/HARDENING.md)
+for the restricted key setup.
+
+| Command | What it does |
+|---|---|
+| `/status` | health: alive, mode, P&L, positions, pending orders, feed, halts |
+| `/eod-review [date]` | trades, signals, errors, last-10-day comparison, up to 3 testable ideas |
+| `/report` | performance dashboard from the journal |
+| `/backtest SYMBOL [strategy] [params]` | in-sample versus out-of-sample backtest table |
+| `/tune SYMBOL strategy` | small grid sweep + walk-forward; proposes a YAML diff only if it holds up |
+| `/new-strategy <idea>` | a Strategy class + tests + backtest comparison |
+| `/preflight` | go-live readiness checklist (read-only) |
+| `/incident [what]` | root cause of errors, rejections, stuck exits, feed drops |
+
+Guardrails (`.claude/settings.json`): read-only tools are allowed; pause, resume, kill, config edits, service restarts
+and candle downloads ask you first; `.env`, `profiles/*.env`, and starting or enabling the live services are denied.
+These are guardrails, not a security boundary (Claude runs as the same Linux user). For hard isolation, run the bot
+under a separate Linux user that owns `.env`.
+
+---
+
+## 9. Going live (manual, human-only)
+
+Only after **3–4 weeks of paper trading** that roughly matches the backtest, and `/preflight` passes:
+
+1. `cp config/config.yaml config/config.live.yaml` and set `qty: 1` (1 share or 1 lot) and a small `risk.max_daily_loss`.
+2. `cp profiles/live.env.example profiles/live.env && chmod 600 profiles/live.env`, then add the Live bot token and
+   uncomment the two lines yourself:
    ```
    ANGELBOT_MODE=live
    ANGELBOT_LIVE_CONFIRM=I_ACCEPT_REAL_MONEY_RISK
    ```
-3. `bot.cli check` again (IP must match), then watch the first sessions closely with the Angel One app open.
-Revert by setting `ANGELBOT_MODE=paper`.
+3. `./deploy/ab live check` (the IP must match), then stop paper from trading on the same account and enable live:
+   ```bash
+   systemctl --user disable --now angelbot@paper.timer
+   systemctl --user enable --now angelbot@live.timer angelbot-telegram@live
+   ```
+4. Watch the first sessions with the Angel One app open.
 
-## 8. Compliance notes (India, from 1 Apr 2026)
+To revert: `systemctl --user disable --now angelbot@live.timer` and comment out the two lines in `profiles/live.env`
+(the bot then runs in paper mode inside the live folder).
 
-API orders are treated as **algo orders**. This setup is the "tech-savvy client, own algo, own
-account" case: static registered IP, **LIMIT orders only** (MARKET/IOC rejected), **< 10 orders/sec**
-(no exchange registration needed below that). Don't run it for other people's accounts or sell
-signals from it — that needs empanelment / RA registration. Confirm specifics with Angel One SmartAPI
-support; rules and broker implementations change.
+---
 
-## 9. Known limitations — read these
+## 10. Compliance notes (India, from 1 Apr 2026)
 
-- **Stops live in the bot, not at the exchange.** If the VM/network dies with a position open, nothing
-  exits it until the bot restarts (systemd restarts it in ~20s and re-adopts positions) or the broker's
-  ~15:20 auto square-off. Keep size small. (An improvement: also place an exchange SL-L order per position.)
-- Paper fills are optimistic vs real queues/slippage; backtests are bar-based. Expect live to be worse.
-- Bundled strategies are **examples to show the plumbing, not proven edges**. Charges matter a lot at
-  small sizes — most scalping strategies lose after costs.
-- `charges` in config are approximations; verify against Angel One's current tariff.
-- Exits use marketable LIMIT orders with chasing; in a fast market an exit can lag. Stuck exits alert
-  via log/Telegram after `max_exit_chases`.
+API orders are treated as **algo orders**. This setup is the "tech-savvy client, own algo, own account" case: static
+registered IP, **LIMIT orders only** (MARKET/IOC rejected), **under 10 orders/sec** (no exchange registration needed
+below that). Don't run it for other people's accounts or sell signals from it; that needs empanelment or RA
+registration. Confirm specifics with Angel One SmartAPI support; rules and broker implementations change.
 
-## 10. Troubleshooting
+## 11. Known limitations
+
+- **Stops live in the bot, not at the exchange.** If the VM or network dies with a position open, nothing exits it
+  until the bot restarts (systemd retries in about 20 s and re-adopts positions) or the broker's ~15:20 auto
+  square-off. Keep size small.
+- Paper fills are optimistic versus real queues and slippage; backtests are bar-based. Expect live to be worse.
+- The bundled strategies are **examples of the plumbing, not proven edges**. Charges dominate at small sizes: at 1 share
+  the round trip costs about 0.27% of the trade.
+- `charges` in the config are approximations; check Angel One's current tariff.
+- Exits use marketable LIMIT orders with chasing; in a fast market an exit can lag. Stuck exits alert after
+  `max_exit_chases`.
+- The screener and morning selection have not been backtested.
+
+## 12. Troubleshooting
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `login failed` | wrong PIN/TOTP secret, or VM clock off → `timedatectl` (chrony should fix) |
-| orders rejected, IP-related message | VM IP ≠ registered static IP → `bot.cli check`, update SmartAPI app |
-| `AG8001 Invalid Token` loops | session expired (midnight) — bot re-logs in; restart service if persistent |
-| no ticks / feed restarts | market closed, token wrong for exchange, or network; see `tail_log` |
-| `Instrument ... not found` | symbol typo or expired contract → `bot.cli instruments <name> --exchange NFO` |
-| bot didn't start | holiday, weekend, timer disabled → `systemctl --user list-timers` (`angelbot@paper.timer`) |
-| bot started but no trades after a kill | it's paused → `bot.cli resume` |
+| `login failed` | wrong PIN or TOTP secret, or VM clock off → `timedatectl` |
+| orders rejected, IP-related message | VM IP ≠ registered static IP → `./deploy/ab paper check`, update the SmartAPI app |
+| `Failed to load environment files` | `profiles/<area>.env` missing: copy it from the `.example` (intended for live until you go live) |
+| `No area given, so '...' would use the old runtime/ folder` | use `./deploy/ab <area> <command>` instead of a bare `bot.cli` command |
+| `screen` refuses: bot is running | run it after the session (about 15:32) or before 09:00 |
+| Telegram buttons show old behaviour | `systemctl --user restart angelbot-telegram@paper` after a `git pull` |
+| "No screener snapshot" in Telegram | no screen run yet in that area → `./deploy/ab paper screen` |
+| `AG8001 Invalid Token` loops | session expired (midnight); the bot re-logs in, restart the service if it persists |
+| no ticks / feed restarts | market closed, wrong token for the exchange, or network → `journalctl --user -u angelbot@paper` |
+| `Instrument ... not found` | symbol typo or expired contract → `./deploy/ab paper instruments <name> --exchange NFO` |
+| bot didn't start | holiday, weekend or timer disabled → `systemctl --user list-timers 'angelbot@*'` |
+| no trades after a kill | it is paused → `./deploy/ab paper resume` before the next session |
 
 ## Layout
 
 ```
-bot/            engine, strategies, risk, orders, broker, paper, feed, backtest, journal, cli
-mcp_server/     MCP server for Claude Code (.mcp.json registers it)
-config/         config.yaml  (strategy, instruments, risk, session, execution, charges)
+bot/            engine, strategies, risk, orders, broker, paper, feed, backtest, journal, cli,
+                screener + screen_data + screen_report, universe, selection, telegram_ctl, notify, messages
+mcp_server/     MCP server for Claude Code (.mcp.json registers it, on the paper area)
+config/         config.yaml (strategy, instruments, risk, session, execution, charges); universe/ (NSE index lists)
+profiles/       paper / live / research templates (*.env.example); the real *.env files are secret and git-ignored
 deploy/         setup_oci.sh, angelbot@.service/.timer, angelbot-telegram@.service, ab (area wrapper), split_journal.py
-profiles/       paper / live / research env templates (the real *.env files are secret and git-ignored)
+skills/         angelbot-report: portable report builder for any agent
+docs/           ENVIRONMENTS.md (areas), HARDENING.md (VM security)
 .claude/        settings.json (permissions), commands/ (slash commands)   CLAUDE.md (Claude's rules)
-tests/          25 unit/integration tests (paper broker, replay engine, risk, live adapters w/ fakes)
+tests/          unit and integration tests (pytest)
 ```
 
-**Disclaimer:** educational software, no warranty. Trading involves substantial risk of loss; most
-retail intraday/F&O traders lose money. Not investment advice. You are responsible for compliance
-and for every order placed with your credentials.
+**Disclaimer:** educational software, no warranty. Trading involves substantial risk of loss; most retail intraday and
+F&O traders lose money. Not investment advice. You are responsible for compliance and for every order placed with
+your credentials.
