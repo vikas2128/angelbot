@@ -48,3 +48,25 @@ def collect(broker, instruments: list[Instrument], now: datetime, lookback_days:
                      "prev_close": q.get("close"), "volume": q.get("tradeVolume", q.get("volume")),
                      "bid": first("buy"), "ask": first("sell"), "daily": daily})
     return raws, errors
+
+
+def run_screen(cfg: dict, broker, master: list[dict], now: datetime, universe: list[str] | None = None,
+               top_n: int | None = None) -> dict:
+    """Resolve the universe, collect market data, and return the ranked snapshot (read-only)."""
+    from bot import screener
+    from bot.instruments import resolve
+
+    p = screener.params_from(cfg)
+    if top_n:
+        p["top_n"] = top_n
+    symbols = list(universe or (cfg.get("screener") or {}).get("universe") or screener.DEFAULT_UNIVERSE)
+    insts, errors = [], []
+    for sym in symbols:
+        try:
+            insts.append(resolve([{"symbol": sym, "exchange": "NSE", "qty": 1}], master)[0])
+        except ValueError:
+            errors.append(f"{sym}: not found in the instrument master")
+    if not insts:
+        raise ValueError("no stocks to screen: " + "; ".join(errors))
+    raws, errs = collect(broker, insts, now, int(p["lookback_days"]))
+    return screener.rank(raws, p, cfg.get("charges", {}), now, errors + errs)

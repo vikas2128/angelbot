@@ -184,6 +184,28 @@ def build_screen_file(out_dir: Path) -> tuple[Path, str]:
     return path, SR.summary_html(snap, now_ist().strftime("%Y-%m-%d"))
 
 
+def apply_choice(arg: str, today: str) -> str:
+    """A tap on the morning picks message. Writes your choice for the bot, which is waiting for it. Never adds a stock
+    that is not one of today's picks, and never changes anything once the bot has decided."""
+    req = control.read_json(control.SEL_REQUEST)
+    if not req or req.get("market_date") != today:
+        return "No stock selection is open right now."
+    if req.get("phase") != "waiting":
+        left = ", ".join(req.get("decided") or []) or "nothing"
+        return f"Too late for today: the bot already decided and is trading {html.escape(left)}."
+    picks = [p["symbol"] for p in req.get("picks") or []]
+    if arg == "top":
+        choice, said = list(req.get("top") or []), "the top picks"
+    elif arg == "config":
+        choice, said = "config", "your configured list"
+    elif arg in picks:
+        choice, said = [arg], arg
+    else:
+        return "That is not one of today's picks."
+    control.write_json(control.SEL_CHOICE, {"market_date": today, "choice": choice, "at": now_ist().isoformat(timespec="seconds")})
+    return f"\u2705 Got it: <b>{html.escape(said)}</b>. The bot starts with this now."
+
+
 def kill_ask() -> tuple[str, list[list[dict]]]:
     text = ("⚠️ <b>Emergency stop</b>\nThis cancels waiting entries, closes ALL positions and stops the bot.\n"
             "Tap the button below within a minute, or send /kill CONFIRM.")
@@ -246,6 +268,8 @@ def callback(data: str, now: float | None = None) -> tuple[str, list[list[dict]]
         return route("/resume")
     if action == "menu":
         return HELP, main_menu()
+    if action == "sel":
+        return apply_choice(arg, now_ist().strftime("%Y-%m-%d")), None
     if action == "kill_ask":
         return kill_ask()
     if action == "kill_do":

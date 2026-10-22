@@ -83,6 +83,21 @@ def cmd_check(args, cfg):
     b.logout()
 
 
+def _select_instruments(cfg, broker, insts, log):
+    """Morning stock selection. Does nothing unless config `selection.mode` is auto or confirm."""
+    if str((cfg.get("selection") or {}).get("mode", "off")).lower() == "off":
+        return insts
+    try:
+        from bot import selection
+        from bot.instruments import load_master
+        chosen, decision = selection.run(cfg, broker, insts, load_master())
+        log.info("selection: %s (%s)", decision.get("symbols"), decision.get("source"))
+        return chosen
+    except Exception:
+        log.exception("selection crashed; using the configured list")
+        return insts
+
+
 def cmd_run(args, cfg):
     from bot.engine import Engine
     from bot.feed import LiveFeed, ReplayFeed
@@ -127,6 +142,12 @@ def cmd_run(args, cfg):
     mode = C.trading_mode()
     insts = _instruments(cfg)
     data_broker = _live_broker(cfg)                  # needed for the feed in both modes
+    insts = _select_instruments(cfg, data_broker, insts, log)
+    if not insts:
+        log.warning("stock selection decided: no trading today")
+        data_broker.logout()
+        return 0
+    today = now_ist()                                # selection may have waited for the open: refresh before the warm-up
     broker = data_broker if mode == "live" else PaperBroker(slip)
     feed = LiveFeed(data_broker, insts, q)
     eng = Engine(cfg, broker, feed, insts, journal, q)
@@ -196,33 +217,23 @@ def cmd_backtest(args, cfg):
 
 def cmd_screen(args, cfg):
     """Rank a universe of stocks (advisory). Reads market data only, then writes runtime/screen.json."""
-    from bot import screen_data, screener
-    from bot.instruments import load_master, resolve
+    from bot import screen_data
+    from bot.instruments import load_master
     from bot.screen_report import render_html
 
     st = control.read_status()
     if st.get("bot_alive") and not st.get("replay") and not args.force:
         sys.exit("The bot is running right now. A second broker login during a session may disturb it. "
                  "Run this before 09:00 or after the session ends, or pass --force if you accept that risk.")
-    p = screener.params_from(cfg)
-    if args.top:
-        p["top_n"] = args.top
-    symbols = ([s.strip() for s in args.universe.split(",") if s.strip()] if args.universe
-               else list((cfg.get("screener") or {}).get("universe") or screener.DEFAULT_UNIVERSE))
-    master, insts, errors = load_master(), [], []
-    for sym in symbols:
-        try:
-            insts.append(resolve([{"symbol": sym, "exchange": "NSE", "qty": 1}], master)[0])
-        except ValueError:
-            errors.append(f"{sym}: not found in the instrument master")
-    if not insts:
-        sys.exit("no stocks to screen: " + "; ".join(errors))
+    universe = [x.strip() for x in args.universe.split(",") if x.strip()] if args.universe else None
+    master = load_master()
     broker = _live_broker(cfg)
     try:
-        raws, errs = screen_data.collect(broker, insts, now_ist(), int(p["lookback_days"]))
+        snap = screen_data.run_screen(cfg, broker, master, now_ist(), universe, args.top)
+    except ValueError as e:
+        sys.exit(str(e))
     finally:
         broker.logout()
-    snap = screener.rank(raws, p, cfg.get("charges", {}), now_ist(), errors + errs)
     control.write_screen(snap)
     print(f"screened {snap['universe']} stocks, {snap['eligible']} passed the gates  ({snap['market_date']})")
     for r in snap["rows"]:

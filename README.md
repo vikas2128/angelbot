@@ -153,6 +153,34 @@ trades**: the bot still trades only the instruments in `config/config.yaml`.
   (no broker calls). Optional `screener:` keys in config (`order_value`, `top_n`, gate limits, `weights`) override the defaults.
 - The ranking is a heuristic and has **not been backtested**. Use it to shortlist stocks to test; do not treat it as a signal.
 
+### Morning stock selection (opt-in, off by default)
+
+With `selection.mode: off` (the default, also when the section is absent) the bot trades exactly the instruments in
+`config.yaml`. To let the screener choose what the bot trades each day, add to `config.yaml` (needs your approval,
+then `validate_config`; it applies from the next session):
+
+```yaml
+selection:
+  mode: confirm          # off | auto | confirm
+  top_n: 1               # how many of the top picks to trade (1 to 3)
+  screen_at: "09:16:30"  # after the open, so today's gap exists
+  confirm_until: "09:19:30"   # must be at or before session.entry_start
+  on_timeout: config     # confirm, no tap: config (your list) | top (the top picks)
+  on_failure: config     # screen failed or nothing passed: config | none (no trading today)
+  qty: 1                 # shares per order for a picked stock ...
+  order_value: 0         # ... or, if > 0, shares = this many rupees // price (bigger size = bigger risk per trade)
+```
+
+- **auto**: at `screen_at` the bot screens (on its own login, no second login) and trades the top `top_n` picks.
+- **confirm**: it sends the picks to Telegram with buttons (*Only X*, *Trade top N*, *Keep my list*) and waits until
+  `confirm_until`. Your tap applies at once; no tap follows `on_timeout`.
+- A tap can only choose a stock that passed the screener's gates in today's snapshot, and only while the bot is waiting.
+  Once it has decided, taps are refused. Trades still follow the same strategy, stops and risk limits.
+- The decision is saved for the day, so a restart keeps the same stocks. Any failure falls back per `on_failure`.
+- The start of trading moves to `confirm_until` at the latest; indicators warm up from the day's candles as after a mid-day restart.
+- The ranking has **not been backtested**. Run it in paper mode and compare against a fixed list before trusting it, and read
+  the risk note: bigger `order_value` raises the loss per stop against `risk.max_daily_loss`.
+
 ## 7. Going live (manual, human-only)
 
 Only after **≥ 3–4 weeks of paper trading** that roughly matches the backtest, and `/preflight` passes:

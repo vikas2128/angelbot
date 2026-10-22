@@ -18,6 +18,9 @@ CONTROL = RUNTIME_DIR / "control.json"
 STATUS = RUNTIME_DIR / "status.json"
 JOURNAL = RUNTIME_DIR / "journal.db"
 SCREEN = RUNTIME_DIR / "screen.json"
+SEL_REQUEST = RUNTIME_DIR / "selection_request.json"   # bot -> Telegram: today's picks and whether it is still waiting
+SEL_CHOICE = RUNTIME_DIR / "selection_choice.json"     # Telegram -> bot: what you tapped
+SEL_STATE = RUNTIME_DIR / "selection_state.json"       # what the bot decided today (reused after a restart)
 LOG = RUNTIME_DIR / "bot.log"
 
 
@@ -57,6 +60,10 @@ def set_control(paused: bool | None = None, kill: bool | None = None, note: str 
 def write_status(status: dict) -> None:
     status["written_at"] = now_ist().isoformat()
     _atomic_write(STATUS, status)
+
+
+def write_json(path: Path, data: dict) -> None:
+    _atomic_write(path, data)
 
 
 def write_screen(snapshot: dict) -> None:

@@ -269,3 +269,40 @@ def test_send_screen_reports_a_missing_snapshot_in_chat(tmp_path, monkeypatch):
     monkeypatch.setattr(t, "send", lambda text, markup=None: sent.append(text))
     t.send_screen()
     assert sent and "No screener snapshot yet" in sent[0] and "bot.cli screen" in sent[0]
+
+
+def _request(tmp_path, monkeypatch, phase="waiting", day="2026-10-22"):
+    monkeypatch.setattr(control, "SEL_REQUEST", tmp_path / "req.json")
+    monkeypatch.setattr(control, "SEL_CHOICE", tmp_path / "choice.json")
+    control.write_json(control.SEL_REQUEST, {"market_date": day, "phase": phase, "decided": ["HDFCBANK-EQ"],
+                                             "top": ["TATASTEEL-EQ", "HDFCBANK-EQ"],
+                                             "picks": [{"symbol": "TATASTEEL-EQ"}, {"symbol": "HDFCBANK-EQ"}, {"symbol": "INFY-EQ"}]})
+
+
+def test_tapping_a_pick_writes_the_choice(tmp_path, monkeypatch):
+    from bot.telegram_ctl import apply_choice
+    _request(tmp_path, monkeypatch)
+    assert "Got it" in apply_choice("HDFCBANK-EQ", "2026-10-22")
+    assert control.read_json(control.SEL_CHOICE)["choice"] == ["HDFCBANK-EQ"]
+    apply_choice("top", "2026-10-22")
+    assert control.read_json(control.SEL_CHOICE)["choice"] == ["TATASTEEL-EQ", "HDFCBANK-EQ"]
+    apply_choice("config", "2026-10-22")
+    assert control.read_json(control.SEL_CHOICE)["choice"] == "config"
+
+
+def test_a_tap_cannot_add_an_unlisted_stock_or_change_a_decision(tmp_path, monkeypatch):
+    from bot.telegram_ctl import apply_choice
+    _request(tmp_path, monkeypatch)
+    assert "not one of today's picks" in apply_choice("EVIL-EQ", "2026-10-22")
+    assert not (tmp_path / "choice.json").exists()
+    _request(tmp_path, monkeypatch, phase="decided")
+    assert "Too late" in apply_choice("INFY-EQ", "2026-10-22") and not (tmp_path / "choice.json").exists()
+    _request(tmp_path, monkeypatch, day="2026-10-21")
+    assert "No stock selection is open" in apply_choice("INFY-EQ", "2026-10-22")
+
+
+def test_selection_button_is_routed_by_the_callback(tmp_path, monkeypatch):
+    _request(tmp_path, monkeypatch)
+    monkeypatch.setattr("bot.telegram_ctl.now_ist", lambda: datetime.fromisoformat("2026-10-22 09:17").replace(tzinfo=IST))
+    text, markup = callback("sel:top")
+    assert "Got it" in text and markup is None

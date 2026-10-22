@@ -256,3 +256,35 @@ def status_card(s: dict, control: dict, configured_mode: str | None = None) -> s
     if control.get("kill"):
         lines.append("⛔ Emergency stop is set")
     return "\n".join(lines)
+
+
+# ───────────────────────────── morning stock selection ─────────────────────────────
+def selection_problem(err: str) -> str:
+    return f"\u26a0\ufe0f <b>Stock selection settings problem</b>\n{esc(err)}\nUsing your configured list today."
+
+
+def picks_prompt(rows: list[dict], top: list[str], deadline: str, default: list[str]) -> str:
+    lines = ["\U0001F50E <b>Today's picks</b> (advisory ranking, not backtested)"]
+    for i, r in enumerate(rows, 1):
+        gap = "n/a" if r.get("gap_pct") is None else f"{r['gap_pct']:+.1f}%"
+        room = "n/a" if r.get("range_to_cost") is None else f"{r['range_to_cost']:.1f}x"
+        lines.append(f"{i}. <b>{esc(r['symbol'])}</b> \u00b7 score {r['score']:.0f} \u00b7 gap {gap} \u00b7 room {room} fees")
+    lines.append(f"\nTap what the bot should trade today. If you don't, by {esc(deadline)} it uses: "
+                 f"<b>{esc(', '.join(default) or 'nothing')}</b>.")
+    lines.append("Trades still follow the strategy, stops and risk limits.")
+    return "\n".join(lines)
+
+
+def picks_buttons(shown: list[str], top: list[str], configured: list[str]) -> list[list[dict]]:
+    rows = [[{"text": f"\u25b6 Only {s}", "callback_data": f"sel:{s}"}] for s in shown]
+    if len(top) > 1:
+        rows.insert(0, [{"text": f"\u2705 Trade top {len(top)}", "callback_data": "sel:top"}])
+    rows.append([{"text": f"Keep my list ({', '.join(configured)})", "callback_data": "sel:config"}])
+    return rows
+
+
+def selection_decided(symbols: list[str], source: str, note: str) -> str:
+    who = {"auto": "Top picks", "you": "Your choice", "timeout": "No tap", "config": "Your configured list", "none": "No trading"}.get(source, source)
+    if not symbols:
+        return f"\u26d4 <b>No trading today</b>\n{esc(note)}"
+    return f"\u2705 <b>Trading today: {esc(', '.join(symbols))}</b>\n{esc(who)}: {esc(note)}."
