@@ -158,3 +158,11 @@ def test_summary_message_flags_a_stale_snapshot():
     fresh = summary_html(snap, "2026-10-22")
     assert "HOT" in fresh and "Advisory only" in fresh and "not today" not in fresh
     assert "from 2026-10-22, not today" in summary_html(snap, "2026-10-23")
+
+
+def test_collect_is_paced_and_reports_progress(monkeypatch):
+    sleeps, seen = [], []
+    monkeypatch.setattr("bot.screen_data.time.sleep", lambda s: sleeps.append(s))
+    collect(FakeBroker(QUOTE), INSTS, NOW, pause=1.0, progress=lambda i, n, sym: seen.append((i, n, sym)))
+    assert sleeps == [1.0, 1.0, 1.0, 1.0]            # after login, after quotes, after each of the 2 stocks
+    assert seen == [(1, 2, "AAA-EQ"), (2, 2, "BBB-EQ")]

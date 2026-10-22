@@ -227,13 +227,20 @@ def cmd_screen(args, cfg):
                  "Run this before 09:00 or after the session ends, or pass --force if you accept that risk.")
     universe = [x.strip() for x in args.universe.split(",") if x.strip()] if args.universe else None
     master = load_master()
+    beside_bot = bool(st.get("bot_alive") and not st.get("replay"))
     broker = _live_broker(cfg)
+    print("logged in; reading quotes and daily candles (one call a second, so about "
+          f"{len(universe) if universe else 20} seconds or more)...")
     try:
-        snap = screen_data.run_screen(cfg, broker, master, now_ist(), universe, args.top)
+        snap = screen_data.run_screen(cfg, broker, master, now_ist(), universe, args.top,
+                                      progress=lambda i, n, sym: print(f"  [{i}/{n}] {sym}", flush=True))
     except ValueError as e:
         sys.exit(str(e))
+    except KeyboardInterrupt:
+        sys.exit("interrupted")
     finally:
-        broker.logout()
+        if not beside_bot:        # never end the broker session while the bot is running: it may share it
+            broker.logout()
     control.write_screen(snap)
     print(f"screened {snap['universe']} stocks, {snap['eligible']} passed the gates  ({snap['market_date']})")
     for r in snap["rows"]:
