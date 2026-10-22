@@ -166,3 +166,58 @@ def test_collect_is_paced_and_reports_progress(monkeypatch):
     collect(FakeBroker(QUOTE), INSTS, NOW, pause=1.0, progress=lambda i, n, sym: seen.append((i, n, sym)))
     assert sleeps == [1.0, 1.0, 1.0, 1.0]            # after login, after quotes, after each of the 2 stocks
     assert seen == [(1, 2, "AAA-EQ"), (2, 2, "BBB-EQ")]
+
+
+# ---------------------------------------------------------------- lists, index tags and tabs
+def _tagged_snap(n_bad=7):
+    rows = [raw("SBIN-EQ", open=1020.0, volume=900_000), raw("TCS-EQ", open=1005.0, volume=300_000),
+            raw("YESBANK-EQ", open=990.0, volume=500_000)] + [raw(f"THIN{i}-EQ", daily=daily(vol=500)) for i in range(n_bad)]
+    snap = rank(rows, params_from(None), CHARGES, NOW)
+    tags = {"SBIN-EQ": ["N50", "BANK"], "TCS-EQ": ["N50"], "YESBANK-EQ": ["BANK"], "THIN0-EQ": ["N50"]}
+    for r in snap["rows"]:
+        r["indices"] = tags.get(r["symbol"], [])
+    snap["lists"] = [{"name": "nifty50", "title": "Nifty 50", "tag": "N50", "count": 50, "fetched_at": "2026-10-22T13:47:00+05:30", "stale": False},
+                     {"name": "banknifty", "title": "Bank Nifty", "tag": "BANK", "count": 14, "fetched_at": "2026-10-22T13:47:00+05:30", "stale": False}]
+    return snap
+
+
+def _text(page):
+    import re
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"<style.*?</style>", "", page, flags=re.S)))
+
+
+def test_page_says_which_lists_were_screened_and_tags_each_stock():
+    page = render_html(_tagged_snap())
+    t = _text(page)
+    assert "Screened: Nifty 50 (50, list from 22 Oct) + Bank Nifty (14, list from 22 Oct)" in t
+    assert '<td>SBIN<span class="tag">N50</span><span class="tag">BANK</span>' in page               # -EQ dropped on the page
+    assert '<td>YESBANK<span class="tag">BANK</span>' in page and '<b>THIN0</b><span class="tag">N50</span>' in page
+
+
+def test_page_has_tabs_per_list_and_a_left_out_tab_without_javascript():
+    page = render_html(_tagged_snap())
+    assert "<script" not in page
+    for k, label in (("all", "All (3)"), ("n50", "Nifty 50 (2)"), ("bank", "Bank Nifty (2)"), ("out", "Left out (7)")):
+        assert f'<label for="st-{k}" role="tab">{label}</label>' in page, label
+        assert f'id="sp-{k}"' in page and f"#st-{k}:checked~#sp-{k}{{display:block}}" in page
+    assert '<input class="tab-in" type="radio" name="st" id="st-all" checked>' in page and page.count(" checked>") == 1
+    n50 = page.split('id="sp-n50"', 1)[1].split('id="sp-bank"', 1)[0]
+    assert "<td>SBIN<" in n50 and "<td>TCS<" in n50 and "YESBANK" not in n50                 # each tab shows only its index
+    out = page.split('id="sp-out"', 1)[1]
+    assert out.count("<li><b>THIN") == 7                                                      # the left-out list sits in its own tab
+
+
+def test_a_hand_picked_list_gets_plain_tabs():
+    snap = rank([raw("A-EQ"), raw("B-EQ", daily=daily(vol=500))], params_from(None), CHARGES, NOW)
+    page = render_html(snap)
+    assert "Screened: a hand-picked list of stocks" in _text(page)
+    assert '<label for="st-all"' in page and '<label for="st-out"' in page and 'for="st-n50"' not in page
+
+
+def test_telegram_summary_names_the_lists_and_tags_the_picks():
+    text = summary_html(_tagged_snap(), "2026-10-22")
+    assert "Screened: Nifty 50 (50, list from 22 Oct) + Bank Nifty (14, list from 22 Oct)" in text
+    assert "<b>SBIN-EQ</b> [N50] [BANK]" in text and "<b>YESBANK-EQ</b> [BANK]" in text
+    snap = _tagged_snap()
+    snap["lists"][1]["stale"], snap["lists"][1]["age_days"] = True, 130
+    assert "Bank Nifty (14, list from 22 Oct, 130 days old: refresh it)" in summary_html(snap, "2026-10-22")

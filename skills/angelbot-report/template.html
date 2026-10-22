@@ -55,14 +55,18 @@ ul{margin:12px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
 footer{color:var(--muted);font-size:12px}
 @media (max-width:480px){.hide-s{display:none}}
 [hidden]{display:none!important}
+/* Tabs without JavaScript: a hidden radio button per tab, and the label is the button. They work in browsers and in
+   previews that do not run scripts. Printing shows both panels. */
+.tab-in{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}
-.tabs button{appearance:none;background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);font:600 15px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:10px 16px;margin-bottom:-1px;cursor:pointer}
-.tabs button[aria-selected=true]{color:var(--fg);border-bottom-color:var(--accent)}
-.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.panel{display:flex;flex-direction:column;gap:16px}
+.tabs label{color:var(--muted);font:600 15px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:10px 16px;margin-bottom:-1px;border-bottom:2px solid transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}
+#tab-today:checked~.tabs label[for=tab-today],#tab-month:checked~.tabs label[for=tab-month]{color:var(--fg);border-bottom-color:var(--accent)}
+#tab-today:focus-visible~.tabs label[for=tab-today],#tab-month:focus-visible~.tabs label[for=tab-month]{outline:2px solid var(--accent);outline-offset:-2px}
+.panel{display:none;flex-direction:column;gap:16px}
+#tab-today:checked~#today,#tab-month:checked~#month{display:flex}
 .ph{font:400 22px/1.2 Georgia,"Iowan Old Style",serif}
-.js .ph{display:none}
-@media print{html,body{background:#fff}.card,.banner{break-inside:avoid}.tabs{display:none!important}.panel[hidden]{display:flex!important}.js .ph{display:block}}
+.tabhint{color:var(--muted);font-size:12px;margin:0}
+@media print{html,body{background:#fff}.card,.banner{break-inside:avoid}.tabs,.tabhint{display:none!important}.panel{display:flex!important}}
 </style>
 </head>
 <body>
@@ -70,31 +74,17 @@ footer{color:var(--muted);font-size:12px}
   <header>
     <h1>AngelBot report</h1>
   </header>
-  <nav class="tabs" id="tabs" role="tablist" hidden>
-    <button type="button" role="tab" data-tab="today" aria-selected="true">Today</button>
-    <button type="button" role="tab" data-tab="month" aria-selected="false">Month</button>
+  <input class="tab-in" type="radio" name="tab" id="tab-today" checked>
+  <input class="tab-in" type="radio" name="tab" id="tab-month">
+  <nav class="tabs" role="tablist">
+    <label for="tab-today" role="tab">Today</label>
+    <label for="tab-month" role="tab">Month</label>
   </nav>
   <div class="panel" id="today" role="tabpanel"><!--@TODAY@--></div>
   <div class="panel" id="month" role="tabpanel"><!--@MONTH@--></div>
+  <p class="tabhint">If tapping a tab does nothing, open this file in your phone's browser.</p>
   <footer><!--@FOOT@--></footer>
 </div>
 <script type="application/json" id="report-data"><!--@JSON@--></script>
-<script>
-/* Tabs are an extra: without this script both panels are simply shown one after the other. */
-(function () {
-  var d = document, nav = d.getElementById('tabs');
-  if (!nav || !d.querySelectorAll) return;
-  var btns = nav.querySelectorAll('button'), panels = d.querySelectorAll('.panel');
-  function show(id, remember) {
-    for (var i = 0; i < panels.length; i++) panels[i].hidden = panels[i].id !== id;
-    for (var j = 0; j < btns.length; j++) btns[j].setAttribute('aria-selected', btns[j].getAttribute('data-tab') === id ? 'true' : 'false');
-    if (remember) { try { history.replaceState(null, '', '#' + id); } catch (e) {} }   // only after a tap: a hash set at load makes the browser jump to the panel
-  }
-  d.documentElement.className += ' js';
-  nav.hidden = false;
-  for (var k = 0; k < btns.length; k++) btns[k].addEventListener('click', function () { show(this.getAttribute('data-tab'), true); });
-  show((location.hash || '').slice(1) === 'month' ? 'month' : 'today', false);
-})();
-</script>
 </body>
 </html>

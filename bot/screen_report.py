@@ -36,8 +36,14 @@ td{padding:8px;border-bottom:1px solid var(--line)}th.r,td.r{text-align:right;wh
 .up{color:var(--ok)}.dn{color:var(--bad)}
 ul.plain{margin:12px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px}
 footer{color:var(--muted);font-size:12px}
+.tag{display:inline-block;font-size:10px;font-weight:600;letter-spacing:.03em;padding:0 5px;margin-left:4px;border:1px solid var(--line);border-radius:4px;color:var(--muted);vertical-align:middle;line-height:16px}
+.tab-in{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap;margin-bottom:12px}
+.tabs label{color:var(--muted);font:600 14px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:10px 12px;margin-bottom:-1px;border-bottom:2px solid transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.panel{display:none}
+.tabhint{color:var(--muted);font-size:12px;margin:8px 0 0}
 @media (max-width:480px){.hide-s{display:none}}
-@media print{html,body{background:#fff}.card{break-inside:avoid}}
+@media print{html,body{background:#fff}.card{break-inside:avoid}.tabs,.tabhint{display:none}.panel{display:block!important;margin-bottom:12px}}
 """
 
 
@@ -51,6 +57,35 @@ def _pct(v, nd=1) -> str:
 
 def _num(v, suffix="") -> str:
     return DASH if v is None else f"{v:g}{suffix}"
+
+
+def _name(sym: str) -> str:
+    """SBIN-EQ -> SBIN on the page: every screened instrument is a cash share, and the suffix only costs width on a phone."""
+    return sym[:-3] if sym.endswith("-EQ") else sym
+
+
+def _tags(r: dict) -> str:
+    return "".join(f'<span class="tag">{esc(t)}</span>' for t in r.get("indices") or [])
+
+
+def _day(iso: str | None) -> str:
+    try:
+        d = datetime.fromisoformat(str(iso))
+        return f"{d.day} {MONTHS[d.month - 1]}"
+    except (TypeError, ValueError):
+        return "unknown date"
+
+
+def lists_text(snap: dict) -> str:
+    """Which lists were screened, e.g. 'Nifty 50 (50, list from 22 Oct) + Bank Nifty (14, list from 22 Oct)'. Plain text."""
+    lists = snap.get("lists") or []
+    if not lists:
+        return "a hand-picked list of stocks"
+    parts = []
+    for x in lists:
+        old = f", {x['age_days']} days old: refresh it" if x.get("stale") else ""
+        parts.append(f"{x['title']} ({x['count']}, list from {_day(x.get('fetched_at'))}{old})")
+    return " + ".join(parts)
 
 
 def date_label(snap: dict) -> str:
@@ -84,7 +119,7 @@ def render_html(snap: dict) -> str:
     bad = [r for r in snap["rows"] if r["excluded"]]
     picks = ok[: int(p["top_n"])]
     cards = "".join(
-        f'<div class="card pick"><div class="rk">#{r["rank"]}</div><div class="sym">{esc(r["symbol"])}</div>'
+        f'<div class="card pick"><div class="rk">#{r["rank"]}</div><div class="sym">{esc(_name(r["symbol"]))}{_tags(r)}</div>'
         f'<div class="sc"><b>{r["score"]:.0f}</b> / 100</div><div class="bar"><div style="width:{r["score"]:.0f}%"></div></div>'
         f'<ul>{"".join("<li>" + esc(w) + "</li>" for w in r["why"])}</ul>'
         f'<div class="chips"><span>Price<b>{esc(_num(r["ltp"], ""))}</b></span><span>Gap<b>{esc(_gap(r["gap_pct"]))}</b></span>'
@@ -98,20 +133,36 @@ def render_html(snap: dict) -> str:
         cls = "" if v is None else ("up" if v > 0 else "dn" if v < 0 else "")
         return f'<td class="r {cls}">{esc(_gap(v))}</td>'
 
-    rows = "".join(
-        f'<tr><td>{r["rank"]}</td><td>{esc(r["symbol"])}</td><td class="r">{r["score"]:.0f}</td>{gap_cell(r["gap_pct"])}'
-        f'<td class="r">{esc(_num(r["range_to_cost"], "x"))}</td><td class="r">{esc(_pct(r["vol_pct_of_avg"], 0))}</td>'
-        f'<td class="r hide-s">{esc(_pct(r["spread_pct"], 2))}</td><td class="r hide-s">{esc(_num(r["traded_value_cr"]))}</td></tr>'
-        for r in ok)
-    table = ('<section class="card"><h2>All eligible stocks, ranked</h2><p class="note">Gap is today\'s open against yesterday\'s close. '
-             'Volume is the share of a normal day already traded. Traded is ₹ crore a day on average</p><div class="scroll"><table>'
-             '<thead><tr><th>#</th><th>Stock</th><th class="r">Score</th><th class="r">Gap</th><th class="r">Room vs fees</th>'
-             '<th class="r">Volume</th><th class="r hide-s">Spread</th><th class="r hide-s">Traded cr</th></tr></thead>'
-             f"<tbody>{rows}</tbody></table></div></section>") if ok else ""
-    excl = ""
+    def table(rows_: list[dict]) -> str:
+        if not rows_:
+            return '<p class="note">No stock from this list passed the gates.</p>'
+        body = "".join(
+            f'<tr><td>{r["rank"]}</td><td>{esc(_name(r["symbol"]))}{_tags(r)}</td><td class="r">{r["score"]:.0f}</td>{gap_cell(r["gap_pct"])}'
+            f'<td class="r">{esc(_num(r["range_to_cost"], "x"))}</td><td class="r">{esc(_pct(r["vol_pct_of_avg"], 0))}</td>'
+            f'<td class="r hide-s">{esc(_pct(r["spread_pct"], 2))}</td><td class="r hide-s">{esc(_num(r["traded_value_cr"]))}</td></tr>'
+            for r in rows_)
+        return ('<div class="scroll"><table><thead><tr><th>#</th><th>Stock</th><th class="r">Score</th><th class="r">Gap</th>'
+                '<th class="r">Room vs fees</th><th class="r">Volume</th><th class="r hide-s">Spread</th><th class="r hide-s">Traded cr</th>'
+                f'</tr></thead><tbody>{body}</tbody></table></div>')
+
+    # Tabs without JavaScript (a hidden radio button per tab; the label is the button), so they work in phone previews too
+    tabs = [("all", f"All ({len(ok)})", "Every stock that passed the gates, best first. Gap is today's open against yesterday's "
+             "close. Volume is the share of a normal day already traded. Traded is \u20b9 crore a day on average", table(ok))]
+    for x in snap.get("lists") or []:
+        sub = [r for r in ok if x["tag"] in (r.get("indices") or [])]
+        tabs.append((x["tag"].lower(), f"{x['title']} ({len(sub)})", f"{x['title']} stocks that passed the gates, best first", table(sub)))
     if bad:
-        items = "".join(f"<li><b>{esc(r['symbol'])}</b>: {esc('; '.join(r['excluded']))}</li>" for r in bad)
-        excl = f'<section class="card"><h2>Left out</h2><p class="note">These failed a gate, so they are not scored</p><ul class="plain">{items}</ul></section>'
+        items = "".join(f"<li><b>{esc(_name(r['symbol']))}</b>{_tags(r)}: {esc('; '.join(r['excluded']))}</li>" for r in bad)
+        tabs.append(("out", f"Left out ({len(bad)})", "These failed a gate, so they are not scored", f'<ul class="plain">{items}</ul>'))
+    tab_css = "".join(
+        f"#st-{k}:checked~.tabs label[for=st-{k}]{{color:var(--fg);border-bottom-color:var(--accent)}}"
+        f"#st-{k}:focus-visible~.tabs label[for=st-{k}]{{outline:2px solid var(--accent);outline-offset:-2px}}"
+        f"#st-{k}:checked~#sp-{k}{{display:block}}" for k, *_ in tabs)
+    tabs_html = ('<section class="card">'
+                 + "".join(f'<input class="tab-in" type="radio" name="st" id="st-{k}"{" checked" if i == 0 else ""}>' for i, (k, *_) in enumerate(tabs))
+                 + '<nav class="tabs" role="tablist">' + "".join(f'<label for="st-{k}" role="tab">{esc(t)}</label>' for k, t, *_ in tabs) + "</nav>"
+                 + "".join(f'<div class="panel" id="sp-{k}" role="tabpanel"><p class="note">{esc(n)}</p>{body}</div>' for k, _, n, body in tabs)
+                 + '<p class="tabhint">If tapping a tab does nothing, open this file in your phone\'s browser.</p></section>')
     errs = ""
     if snap.get("errors"):
         items = "".join(f"<li>{esc(e)}</li>" for e in snap["errors"])
@@ -120,12 +171,13 @@ def render_html(snap: dict) -> str:
            + "".join(f"<li>{esc(t)}</li>" for t in how_it_works(p)) + "</ul></section>")
     gen = str(snap.get("generated_at", ""))
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
-            f'<title>AngelBot screener {esc(snap.get("market_date", ""))}</title><style>{CSS}</style></head><body><div class="wrap">'
+            f'<title>AngelBot screener {esc(snap.get("market_date", ""))}</title><style>{CSS}{tab_css}</style></head><body><div class="wrap">'
             f'<header><h1>Stock screener</h1><p class="sub">{esc(date_label(snap))} · checked {snap["universe"]} stocks · '
-            f'{snap["eligible"]} passed the gates · built {esc(gen[11:16])} IST</p></header>'
+            f'{snap["eligible"]} passed the gates · built {esc(gen[11:16])} IST</p>'
+            f'<p class="sub">Screened: {esc(lists_text(snap))}</p></header>'
             '<div class="banner"><i></i><span>Advisory only. The bot trades just the stocks listed in its config, and this ranking changes '
             'nothing there. The score is a heuristic that has not been backtested: use it to shortlist stocks to test, not as a signal.</span></div>'
-            f'<section><div class="picks">{cards}</div></section>{table}{excl}{errs}{how}'
+            f'<section><div class="picks">{cards}</div></section>{tabs_html}{errs}{how}'
             '<footer>Read-only analytics from market data. No orders are placed by the screener.</footer></div></body></html>')
 
 
@@ -136,11 +188,13 @@ def summary_html(snap: dict, today: str | None = None) -> str:
     lines = [f"\U0001F50E <b>Stock screener</b> · {esc(date_label(snap))} {esc(str(snap.get('generated_at', ''))[11:16])} IST"]
     if today and snap.get("market_date") != today:
         lines.append(f"⚠️ This snapshot is from {esc(snap.get('market_date'))}, not today.")
+    lines.append(f"Screened: {esc(lists_text(snap))}")
     if not ok:
         lines.append("No stock passed the gates.")
     for r in ok[:n]:
         bits = [f"score {r['score']:.0f}", f"gap {_gap(r['gap_pct'])}", f"room {_num(r['range_to_cost'], 'x')} fees"]
-        lines.append(f"{r['rank']}. <b>{esc(r['symbol'])}</b> · " + " · ".join(bits))
+        tags = "".join(f" [{esc(t)}]" for t in r.get("indices") or [])
+        lines.append(f"{r['rank']}. <b>{esc(r['symbol'])}</b>{tags} · " + " · ".join(bits))
     lines.append(f"Checked {snap['universe']} stocks, {snap['eligible']} passed the gates.")
     lines.append("Advisory only: the bot still trades just what is in its config.")
     return "\n".join(lines)

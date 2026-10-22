@@ -70,7 +70,9 @@ def run_screen(cfg: dict, broker, master: list[dict], now: datetime, universe: l
     from bot import universe as U
 
     # presets (nifty50, banknifty) become their stocks; plain symbols pass through; a stale or missing list is noted, not fatal
-    symbols, errors = U.expand(list(universe or (cfg.get("screener") or {}).get("universe") or screener.DEFAULT_UNIVERSE))
+    entries = list(universe or (cfg.get("screener") or {}).get("universe") or screener.DEFAULT_UNIVERSE)
+    symbols, errors = U.expand(entries)
+    lists, member = U.membership(entries)
     insts = []
     for sym in symbols:
         try:
@@ -80,4 +82,8 @@ def run_screen(cfg: dict, broker, master: list[dict], now: datetime, universe: l
     if not insts:
         raise ValueError("no stocks to screen: " + "; ".join(errors))
     raws, errs = collect(broker, insts, now, int(p["lookback_days"]), pause=pause, progress=progress)
-    return screener.rank(raws, p, cfg.get("charges", {}), now, errors + errs)
+    snap = screener.rank(raws, p, cfg.get("charges", {}), now, errors + errs)
+    snap["lists"] = lists                                          # which index lists were screened, and how old they are
+    for r in snap["rows"]:
+        r["indices"] = member.get(r["symbol"], [])                 # e.g. ["N50", "BANK"]; empty for a hand-picked symbol
+    return snap

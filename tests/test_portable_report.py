@@ -94,9 +94,13 @@ def test_both_tabs_show_their_data_without_javascript(tmp_path):
     status = {"written_at": "2026-10-21T10:00:00+05:30", "bot_alive": True, "mode": "paper", "positions": []}
     br.render(br.build_all(ROWS2, "1-minute", TODAY, status=status), out)
     page = out.read_text()
-    scripts = re.findall(r"<script[^>]*>", page)
-    assert scripts[0] == '<script type="application/json" id="report-data">' and len(scripts) == 2   # data + tab switcher
-    assert 'id="today"' in page and 'id="month"' in page and "hidden" in page.split("<nav", 1)[1].split(">", 1)[0]
+    assert re.findall(r"<script[^>]*>", page) == ['<script type="application/json" id="report-data">']   # inert data only
+    assert 'id="today"' in page and 'id="month"' in page
+    # tabs work without JavaScript: a radio per tab (Today checked), labels as the buttons, CSS shows the checked panel
+    assert '<input class="tab-in" type="radio" name="tab" id="tab-today" checked>' in page and 'id="tab-month">' in page
+    assert '<label for="tab-today"' in page and '<label for="tab-month"' in page
+    assert "#tab-today:checked~#today" in page and "#tab-month:checked~#month" in page
+    assert ".panel{display:flex!important}" in page                                     # printing shows both
     text = _text(page)
     for needle in ("Today \u00b7 Wed 21 Oct", "Month \u00b7 October 2026", "Trades today", "How trades ended",
                    "Right now", "Bot process", "Goal reached", "Safety exit (stop loss)", "Fewer than 100 trades"):

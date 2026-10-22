@@ -27,6 +27,7 @@ PRESETS = {
     "nifty50": {"file": "nifty50.csv", "title": "Nifty 50", "remote": "ind_nifty50list.csv", "min": 40, "max": 60},
     "banknifty": {"file": "banknifty.csv", "title": "Bank Nifty", "remote": "ind_niftybanklist.csv", "min": 8, "max": 20},
 }
+TAGS = {"nifty50": "N50", "banknifty": "BANK"}
 ALIASES = {"niftybank": "banknifty", "nifty_bank": "banknifty", "nifty_50": "nifty50", "nifty-50": "nifty50"}
 _SYMBOL = re.compile(r"^[A-Z0-9&-]{1,20}$")
 
@@ -117,6 +118,26 @@ def expand(entries: list[str], now: datetime | None = None) -> tuple[list[str], 
                 notes.append(f"{info['title']} list is {age} days old; refresh it with  python -m bot.cli universe refresh")
         out.extend(s for s in syms if s not in out)
     return out, notes
+
+
+def membership(entries: list[str], now: datetime | None = None) -> tuple[list[dict], dict[str, list[str]]]:
+    """Which preset lists were used and which index each stock belongs to: (lists info, {SBIN-EQ: ["N50", "BANK"]})."""
+    lists: list[dict] = []
+    member: dict[str, list[str]] = {}
+    for e in entries:
+        name = canonical(e)
+        if name is None or any(x["name"] == name for x in lists):
+            continue
+        try:
+            syms, info = load(name)
+        except UniverseError:
+            continue                                   # expand() already reports a missing list
+        age = _age_days(info.get("fetched_at"), now)
+        lists.append({"name": name, "title": PRESETS[name]["title"], "tag": TAGS[name], "count": len(syms),
+                      "fetched_at": info.get("fetched_at"), "age_days": age, "stale": age is not None and age > STALE_DAYS})
+        for sym in syms:
+            member.setdefault(sym, []).append(TAGS[name])
+    return lists, member
 
 
 def status(now: datetime | None = None) -> list[dict]:

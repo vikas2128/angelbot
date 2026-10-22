@@ -171,3 +171,25 @@ def test_the_screener_accepts_presets(dirs, monkeypatch):
     snap = screen_data.run_screen({}, FakeBroker(QUOTE), master, SNOW, universe=["nifty50", "BBB-EQ"], pause=0)
     assert snap["universe"] == 2                                                                   # AAA and BBB resolved
     assert any("ZZZ-EQ: not found in the instrument master" in e for e in snap["errors"])
+
+
+def test_membership_tags_each_stock_with_its_index(dirs):
+    shipped, _ = dirs
+    (shipped / "nifty50.csv").write_text(csv_text([f"S{i}" for i in range(48)] + ["BANK0", "BANK1"]))
+    (shipped / "banknifty.csv").write_text(csv_text(BANK))
+    lists, member = U.membership(["nifty50", "banknifty", "XYZ-EQ", "niftybank"], now=NOW)
+    assert [(x["title"], x["tag"], x["count"]) for x in lists] == [("Nifty 50", "N50", 50), ("Bank Nifty", "BANK", 12)]
+    assert member["BANK0-EQ"] == ["N50", "BANK"] and member["S3-EQ"] == ["N50"] and member["BANK5-EQ"] == ["BANK"]
+    assert "XYZ-EQ" not in member
+
+
+def test_the_screen_snapshot_carries_lists_and_tags(dirs, monkeypatch):
+    from bot import screen_data
+    from test_screener import QUOTE, FakeBroker, NOW as SNOW
+    shipped, _ = dirs
+    (shipped / "banknifty.csv").write_text(csv_text(["AAA"] + BANK[:11]))
+    master = [{"symbol": "AAA-EQ", "token": "11", "exch_seg": "NSE", "lotsize": "1", "tick_size": "5"},
+              {"symbol": "BBB-EQ", "token": "22", "exch_seg": "NSE", "lotsize": "1", "tick_size": "5"}]
+    snap = screen_data.run_screen({}, FakeBroker(QUOTE), master, SNOW, universe=["banknifty", "BBB-EQ"], pause=0)
+    tags = {r["symbol"]: r["indices"] for r in snap["rows"]}
+    assert tags == {"AAA-EQ": ["BANK"], "BBB-EQ": []} and [x["tag"] for x in snap["lists"]] == ["BANK"]
