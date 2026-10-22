@@ -1,0 +1,12 @@
+{
+  "nifty50": {
+    "fetched_at": "2026-10-22T13:47:00+05:30",
+    "source": "https://nsearchives.nseindia.com/content/indices/ind_nifty50list.csv",
+    "count": 50
+  },
+  "banknifty": {
+    "fetched_at": "2026-10-22T13:47:00+05:30",
+    "source": "https://nsearchives.nseindia.com/content/indices/ind_niftybanklist.csv",
+    "count": 14
+  }
+}

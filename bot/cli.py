@@ -6,7 +6,8 @@
   python -m bot.cli fetch SBIN-EQ --days 60   # download 1-min candles to data/candles/
   python -m bot.cli backtest SBIN-EQ --from 2026-08-01 --to 2026-10-15 [--strategy orb --params '{"range_minutes":30}']
   python -m bot.cli instruments RELIANCE [--exchange NSE]
-  python -m bot.cli screen [--top 3] [--universe SBIN-EQ,TCS-EQ] [--html out.html]   # rank stocks (advisory, read-only)
+  python -m bot.cli screen [--top 3] [--universe nifty50,banknifty | SBIN-EQ,TCS-EQ] [--html out.html]   # rank stocks (advisory, read-only)
+  python -m bot.cli universe show | refresh [--name nifty50|banknifty]   # the Nifty 50 / Bank Nifty stock lists (NSE CSVs)
   python -m bot.cli status | pause | resume | kill | unkill
   python -m bot.cli sample-data SBIN-EQ       # synthetic candles for offline testing ONLY
 """
@@ -267,6 +268,35 @@ def cmd_screen(args, cfg):
     print("(advisory only: the bot still trades just the instruments in config.yaml)")
 
 
+def cmd_universe(args, cfg):
+    """Show or refresh the Nifty 50 / Bank Nifty stock lists the screener can use. Stocks only; needs no broker login."""
+    from bot import universe as U
+
+    names = None
+    if args.name:
+        n = U.canonical(args.name)
+        if n is None:
+            sys.exit(f"unknown list '{args.name}'; use nifty50 or banknifty")
+        names = [n]
+    if args.action == "show":
+        for r in U.status():
+            if "error" in r:
+                print(f"  {r['title']:<11} {r['error']}")
+            else:
+                age = "age unknown" if r.get("age_days") is None else f"{r['age_days']} days old"
+                print(f"  {r['title']:<11} {r['count']} stocks, {r['where']} copy, {age}{'  <- refresh it' if r.get('stale') else ''}")
+        return
+    failed = False
+    for r in U.refresh(names):
+        if not r["ok"]:
+            failed = True
+            print(f"  {r['title']:<11} NOT updated: {r['error']}")
+            continue
+        change = (f"  (added {', '.join(r['added'])})" if r["added"] else "") + (f"  (removed {', '.join(r['removed'])})" if r["removed"] else "")
+        print(f"  {r['title']:<11} {r['count']} stocks saved from {r['source']}{change}")
+    return 1 if failed else 0
+
+
 def cmd_instruments(args, cfg):
     from bot.instruments import load_master, search
     for r in search(load_master(), args.query, args.exchange, args.limit):
@@ -357,8 +387,12 @@ def main(argv=None):
     i = sub.add_parser("instruments")
     i.add_argument("query"); i.add_argument("--exchange"); i.add_argument("--limit", type=int, default=25)
 
+    un = sub.add_parser("universe")
+    un.add_argument("action", choices=["show", "refresh"]); un.add_argument("--name", help="nifty50 or banknifty (default: both)")
+
     sc = sub.add_parser("screen")
-    sc.add_argument("--top", type=int); sc.add_argument("--universe", help="comma-separated symbols, e.g. SBIN-EQ,TCS-EQ")
+    sc.add_argument("--top", type=int)
+    sc.add_argument("--universe", help="comma-separated presets or symbols, e.g. nifty50,banknifty or SBIN-EQ,TCS-EQ")
     sc.add_argument("--html", help="also write the standalone HTML report here")
     sc.add_argument("--force", action="store_true", help="run even while the bot is running (second login!)")
 
@@ -377,7 +411,7 @@ def main(argv=None):
               "Use ./deploy/ab <paper|live|research> ... to pick an area.", file=sys.stderr)
     cfg = C.load_config(Path(args.config) if args.config else None)
     handlers = {"check": cmd_check, "run": cmd_run, "fetch": cmd_fetch, "backtest": cmd_backtest,
-                "instruments": cmd_instruments, "sample-data": cmd_sample, "screen": cmd_screen,
+                "instruments": cmd_instruments, "sample-data": cmd_sample, "screen": cmd_screen, "universe": cmd_universe,
                 "telegram-test": cmd_telegram_test}
     rc = handlers.get(args.cmd, cmd_control)(args, cfg)
     sys.exit(rc or 0)

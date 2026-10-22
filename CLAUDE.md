@@ -26,6 +26,7 @@ bot/engine.py        event loop: ticks → bars → strategy → risk → orders
 bot/strategies/      ema_cross, orb, vwap_revert  (add new ones + register in __init__.py)
 bot/risk.py          entry gates, daily loss/profit halts, cooldown, order throttle
 bot/screener.py      advisory stock ranking (pure logic); screen_data.py / screen_report.py: data + HTML (never trades)
+bot/universe.py      Nifty 50 / Bank Nifty stock lists for the screener (NSE CSVs in config/universe, refresh into data/universe)
 bot/selection.py     opt-in morning pick of today's instruments from the screener (selection.mode in config; default off)
 bot/orders.py        LIMIT orders, fill tracking, exit chasing, positions, P&L
 bot/broker.py        SmartAPI live adapter       bot/paper.py   paper broker (same interface)

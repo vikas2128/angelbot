@@ -67,8 +67,11 @@ def run_screen(cfg: dict, broker, master: list[dict], now: datetime, universe: l
     p = screener.params_from(cfg)
     if top_n:
         p["top_n"] = top_n
-    symbols = list(universe or (cfg.get("screener") or {}).get("universe") or screener.DEFAULT_UNIVERSE)
-    insts, errors = [], []
+    from bot import universe as U
+
+    # presets (nifty50, banknifty) become their stocks; plain symbols pass through; a stale or missing list is noted, not fatal
+    symbols, errors = U.expand(list(universe or (cfg.get("screener") or {}).get("universe") or screener.DEFAULT_UNIVERSE))
+    insts = []
     for sym in symbols:
         try:
             insts.append(resolve([{"symbol": sym, "exchange": "NSE", "qty": 1}], master)[0])

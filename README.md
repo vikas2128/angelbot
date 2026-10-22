@@ -152,6 +152,12 @@ trades**: the bot still trades only the instruments in `config/config.yaml`.
   is running unless you pass `--force`, because a second login during a session has not been tested.
 - `/screen` in Telegram sends the top picks plus the full ranking as a standalone HTML file from the latest snapshot
   (no broker calls). Optional `screener:` keys in config (`order_value`, `top_n`, gate limits, `weights`) override the defaults.
+- **Nifty 50 and Bank Nifty lists** (stocks only, no index futures or options): `screen --universe nifty50,banknifty` ranks the
+  members of both indices (about 59 distinct stocks, roughly a minute at one call a second), and `screener.universe: [nifty50, banknifty]`
+  in config does the same by default. The lists come from NSE's official constituent CSVs: a snapshot ships in `config/universe/`, and
+  `python -m bot.cli universe refresh` downloads fresh copies into `data/universe/` (git-ignored; a refreshed copy wins). A refresh is
+  validated and never replaces a good list with a broken one. `universe show` lists their age; a list older than about four months is
+  flagged in the screener's "Problems" section. Index membership changes at NSE's reviews, so refresh now and then.
 - The ranking is a heuristic and has **not been backtested**. Use it to shortlist stocks to test; do not treat it as a signal.
 
 ### Morning stock selection (opt-in, off by default)
