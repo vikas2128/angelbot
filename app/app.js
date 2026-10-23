@@ -324,6 +324,12 @@ function renderHome() {
       : `${m.open ? 'Market open' : 'Market closed'} · the bot starts ${startText(m.next_start)}`;
     flags.push(h('div', { class: 'banner ' + kind, text }));
   }
+  // a git pull changes the files, not a running process: say which one still runs the older code
+  const cc = s.code_check || {};
+  if (cc.bot_behind) flags.push(h('div', { class: 'banner', text: `The bot is running older code (${cc.bot}) than the VM has now (${cc.checked_out}). ` +
+    'Restart it to use the update: Restart below when nothing is open, or it picks it up at its next start.' }));
+  if (cc.api_behind) flags.push(h('div', { class: 'banner', text: `The app server is running older code (${cc.api}) than the VM has now (${cc.checked_out}). ` +
+    'On the VM: systemctl --user restart angelbot-api@paper' }));
   if (s.halted_reason && !stale) flags.push(h('div', { class: 'banner bad', text: `Stopped for today: ${s.halted_reason}` }));
   if (alive && s.cooldown_until && Date.parse(s.cooldown_until) > Date.now()) flags.push(h('div', { class: 'banner', text: `Resting after losses until ${hhmm(s.cooldown_until)}` }));
   if (ctl.paused) flags.push(h('div', { class: 'banner', text: 'New entries are paused' }));

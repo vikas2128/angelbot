@@ -45,6 +45,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from bot import actions as A
 from bot import alerts, control
 from bot import config as C
+from bot import version
 from bot import settings as ST
 from bot.api_auth import COOKIE, SESSION_TTL, AuthError, AuthStore, _esc
 from bot.api_push import Pusher, PushError
@@ -168,10 +169,24 @@ def _session_cfg() -> dict:
     return _SESSION.get("session") or {}
 
 
+API_CODE = version.head()                                # the commit this API process started on
+
+
+def code_check(status: dict, checked_out: str | None, api_code: str | None = None) -> dict:
+    """Is the running bot, or this API, on older code than what is checked out now (a git pull without a restart)?
+    Unknown commits never raise a warning."""
+    api_code = API_CODE if api_code is None else api_code
+    bot = status.get("code")
+    return {"checked_out": version.short(checked_out), "bot": version.short(bot), "api": version.short(api_code),
+            "bot_behind": bool(status.get("bot_alive") and bot and checked_out and bot != checked_out),
+            "api_behind": bool(api_code and checked_out and api_code != checked_out)}
+
+
 def status_payload() -> dict:
     s = control.read_status()
     s["control"] = control.read_control()
     s["market"] = market_clock(now_ist(), _session_cfg())
+    s["code_check"] = code_check(s, version.head())
     return s
 
 

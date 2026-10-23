@@ -251,8 +251,13 @@ def status_card(s: dict, control: dict, configured_mode: str | None = None) -> s
         f"⚪ <b>Bot is not running</b> (last update {esc(str(s.get('age_sec', '?')))}s ago)"
     if s.get("replay"):
         head += " (replay)"
-    lines = [head, mode_tag(s.get("mode")),
-             f"Looking for: {_looking_for(s)}",
+    lines = [head, mode_tag(s.get("mode"))]
+    from bot import version
+    now_code = version.head()
+    if alive and s.get("code") and now_code and s["code"] != now_code:
+        lines.append(f"⚠️ Running older code ({esc(version.short(s['code']))}) than the VM has now "
+                     f"({esc(version.short(now_code))}): restart the bot to use the update")
+    lines += [f"Looking for: {_looking_for(s)}",
              f"Today: <b>{money(s.get('day_pnl'))}</b> after fees · {s.get('trades_today', 0)} trades"]
     positions = s.get("positions") or []
     if positions:

@@ -8,7 +8,7 @@ import time
 from collections import deque
 from datetime import datetime, timedelta
 
-from bot import messages, notify, sizing
+from bot import messages, notify, sizing, version
 from bot.bars import BarBuilder
 from bot.control import BARS, BARS_DIR, BARS_KEEP_DAYS, read_control, set_control, write_json, write_status
 from bot.journal import Journal, trades_on
@@ -26,6 +26,7 @@ class Engine:
     def __init__(self, cfg: dict, broker, feed, instruments: list[Instrument], journal: Journal,
                  q: queue.Queue, replay: bool = False):
         self.cfg = cfg
+        self.code = version.head()             # the commit this process runs; a later git pull doesn't change it
         self.broker = broker
         self.feed = feed
         self.q = q
@@ -310,6 +311,7 @@ class Engine:
                                   "target": round(p.target, 2) if p.target else None})
         write_status({
             "state": self.state, "mode": self.broker.mode, "replay": self.replay,
+            "code": self.code,
             "strategy": self.strategies[self.instruments[0].symbol].describe(),
             "strategies": {sym: s.describe() for sym, s in self.strategies.items()},
             "instruments": [i.symbol for i in self.instruments],
