@@ -288,3 +288,43 @@ def test_feed_watchdog_backs_off_and_allows_the_open(cfg, inst, tmp_path, monkey
     eng.feed.last_tick_at = t("10:00")                        # ticks flow again: back to normal and reset
     eng._periodic()
     assert eng._feed_wait == 0.0 and any("Price feed is back" in m for m in sent)
+
+
+def test_after_the_cutoff_with_nothing_open_a_quiet_feed_is_ignored(cfg, inst, tmp_path, monkeypatch):
+    """Today's 15:15-15:30: flat after the square-off, the feed went quiet and every reconnect sent two alerts."""
+    eng, sent = _live_engine(cfg, inst, tmp_path, monkeypatch)
+    eng.feed.connected = True
+    eng.feed.last_tick_at = t("15:14")
+    eng.now = lambda: t("15:20")
+    eng._periodic()
+    assert eng.feed.restarts == 0 and not any("Price feed problem" in m or "Price feed is back" in m for m in sent)
+
+
+def test_after_the_cutoff_an_open_position_still_needs_the_feed(cfg, inst, tmp_path, monkeypatch):
+    eng, sent = _live_engine(cfg, inst, tmp_path, monkeypatch)
+    eng.om.adopt("SBIN-EQ", 1, 800.0, t("14:50"))
+    eng.feed.connected = True
+    eng.feed.last_tick_at = t("15:05")
+    eng.now = lambda: t("15:06")
+    eng._periodic()
+    assert eng.feed.restarts == 1 and any("Price feed problem" in m for m in sent)
+
+
+def test_a_flapping_feed_alerts_once_and_says_back_once(cfg, inst, tmp_path, monkeypatch):
+    import bot.engine as E
+    eng, sent = _live_engine(cfg, inst, tmp_path, monkeypatch)
+    clock = [1000.0]
+    monkeypatch.setattr(E.time, "monotonic", lambda: clock[0])
+    eng.feed.connected = True
+    for k in range(5):                                       # quiet 40 s, one price after each reconnect, repeat
+        now = t("10:00") + timedelta(seconds=60 * k + 40)
+        eng.now = lambda now=now: now
+        eng.feed.last_tick_at = now - timedelta(seconds=40)
+        clock[0] = 1000.0 + 60 * k + 40
+        eng._periodic()
+        eng.feed.last_tick_at = now
+        eng._periodic()
+    problems = [m for m in sent if "Price feed problem" in m]
+    backs = [m for m in sent if "Price feed is back" in m]
+    assert eng.feed.restarts >= 2 and len(problems) == 1 and len(backs) == 1
+    assert "Prices are flowing again" in backs[0]

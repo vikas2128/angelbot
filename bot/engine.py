@@ -19,6 +19,7 @@ from bot.strategies import build
 from bot.timeutil import at, now_ist
 
 log = logging.getLogger("angelbot.engine")
+FEED_ALERT_GAP_SEC = 600          # at most one "price feed problem" alert in 10 minutes
 
 
 class Engine:
@@ -58,6 +59,9 @@ class Engine:
         self.control = {"paused": False, "kill": False}
         self.exit_code = 0
         self._feed_alerted = False       # notification state only
+        self._feed_alert_at = -1e9       # when the last "price feed problem" alert went out (monotonic)
+        self._feed_down_since: datetime | None = None
+        self._feed_restarts_now = 0
         self._heartbeat_sent = False
         self.restored: dict | None = None
         self._bars_pruned = ""
@@ -243,8 +247,12 @@ class Engine:
             notify.send(messages.heartbeat(bool(getattr(self.feed, "connected", False)), dict(self.ltp),
                                            bool(self.control["paused"]), self.cfg["risk"]["max_daily_loss"]))
 
-        # feed watchdog (live only, market hours)
-        if not self.replay and at(now, "09:15") <= now <= at(now, "15:30"):
+        # feed watchdog (live only, market hours), and only while prices matter: before the entry cutoff, or while a
+        # position or order is open. After the square-off with nothing open a quiet feed changes nothing.
+        needed = now < at(now, self.cfg["session"]["entry_cutoff"]) or self.om.open_positions() > 0 or bool(self.om.pending)
+        if not needed and self._feed_alerted:
+            self._feed_alerted = False                               # nothing to report any more
+        if not self.replay and needed and at(now, "09:15") <= now <= at(now, "15:30"):
             stale = float(self.cfg.get("feed", {}).get("stale_after_sec", 30))
             last = self.feed.last_tick_at
             ref = max(last, at(now, "09:15")) if last else at(now, "09:15")      # no ticks before the open are expected
@@ -256,14 +264,20 @@ class Engine:
                 self._feed_wait = min(300.0, self._feed_wait * 2) if self._feed_wait else base
                 self._last_feed_restart = time.monotonic()
                 self.journal.event(now, "feed_restart", "stale/disconnected feed", "WARNING")
-                self._feed_alerted = True
-                notify.send(messages.feed_trouble(last.strftime("%H:%M:%S") if last else None,
-                                                  getattr(self.feed, "restarts", 0) + 1))
+                self._feed_restarts_now += 1
+                # one alert per problem: a feed that keeps flapping does not send a message every minute
+                if not self._feed_alerted and time.monotonic() - self._feed_alert_at > FEED_ALERT_GAP_SEC:
+                    self._feed_alerted, self._feed_alert_at, self._feed_down_since = True, time.monotonic(), now
+                    self._feed_restarts_now = 1
+                    notify.send(messages.feed_trouble(last.strftime("%H:%M:%S") if last else None,
+                                                      getattr(self.feed, "restarts", 0) + 1))
                 self.feed.restart()
-            elif not dead and self._feed_alerted:
-                self._feed_alerted = False
+            elif not dead:
                 self._feed_wait = 0.0
-                notify.send(messages.feed_back())
+                if self._feed_alerted:
+                    self._feed_alerted = False
+                    down = (now - self._feed_down_since).total_seconds() if self._feed_down_since else None
+                    notify.send(messages.feed_back(down, self._feed_restarts_now))
 
         if self.replay or time.monotonic() - self._last_status > 2.0:
             self._last_status = time.monotonic()

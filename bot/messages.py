@@ -179,8 +179,13 @@ def feed_trouble(last_tick, restarts) -> str:
             "No new trades can be judged until prices flow again; open positions still have their safety exit.")
 
 
-def feed_back() -> str:
-    return "📡 <b>Price feed is back</b>\nPrices are flowing again."
+def feed_back(down_sec: float | None = None, reconnects: int = 0) -> str:
+    text = "📡 <b>Price feed is back</b>\nPrices are flowing again"
+    if down_sec is not None and down_sec >= 60:
+        text += f" after about {round(down_sec / 60)} min"
+    if reconnects > 1:
+        text += f" ({reconnects} reconnects)"
+    return text + "."
 
 
 def cooldown(until, losses) -> str:
