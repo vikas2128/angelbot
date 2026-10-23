@@ -83,21 +83,38 @@ def bot_status() -> dict:
 
 @mcp.tool()
 def service_status() -> dict:
-    """systemd state of the bot service and its start timer (OCI host)."""
-    out = {}
-    for unit in ("angelbot.service", "angelbot.timer", "angelbot-telegram.service"):
+    """systemd state of this area's units (OCI host): the trading bot and its morning timer, the Telegram controller,
+    and the nightly per-stock backtest timer. Old pre-area units are listed only if they are still active or failed."""
+    area = os.environ.get("ANGELBOT_PROFILE") or "paper"
+    units = [f"angelbot@{area}.service", f"angelbot@{area}.timer", f"angelbot-telegram@{area}.service",
+             f"angelbot-backtest@{area}.timer", f"angelbot-backtest@{area}.service"]
+    out: dict = {"area": area}
+
+    def state(unit: str) -> str:
         try:
-            r = subprocess.run(["systemctl", "--user", "is-active", unit], capture_output=True, text=True, timeout=5)
-            out[unit] = r.stdout.strip() or r.stderr.strip()
+            r = _SYSTEMCTL(["systemctl", "--user", "is-active", unit], capture_output=True, text=True, timeout=5)
+            return r.stdout.strip() or r.stderr.strip()
         except Exception as e:
-            out[unit] = f"unavailable: {e}"
+            return f"unavailable: {e}"
+
+    for unit in units:
+        out[unit] = state(unit)
+    legacy = {u: s for u in ("angelbot.service", "angelbot.timer", "angelbot-telegram.service")
+              if (s := state(u)) in ("active", "activating", "failed")}
+    if legacy:
+        out["legacy_units"] = {**legacy, "note": "pre-area units: disable with "
+                               "systemctl --user disable --now angelbot.timer angelbot.service angelbot-telegram.service; "
+                               "a 'failed' one is only an old record (systemctl --user reset-failed clears it)"}
     try:
-        r = subprocess.run(["systemctl", "--user", "list-timers", "angelbot.timer", "--no-pager"],
-                           capture_output=True, text=True, timeout=5)
-        out["next_run"] = r.stdout.strip()
+        r = _SYSTEMCTL(["systemctl", "--user", "list-timers", f"angelbot@{area}.timer", f"angelbot-backtest@{area}.timer",
+                        "--all", "--no-pager"], capture_output=True, text=True, timeout=5)
+        out["timers"] = r.stdout.strip()
     except Exception:
         pass
     return out
+
+
+_SYSTEMCTL = subprocess.run          # replaced in tests
 
 
 @mcp.tool()

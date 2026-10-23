@@ -260,3 +260,29 @@ def test_restart_restore_copes_with_old_rows_without_a_timezone(cfg, inst, tmp_p
     eng = _restored(cfg, inst, j, monkeypatch, t("10:15"))              # still inside the cooldown
     assert eng.risk.trades_today == n and eng.om.realized_net == pytest.approx(-6.0 * n)
     assert eng.risk.cooldown_until is not None and eng.risk.cooldown_until.tzinfo is not None
+
+
+def test_feed_watchdog_backs_off_and_allows_the_open(cfg, inst, tmp_path, monkeypatch):
+    import bot.engine as E
+    eng, sent = _live_engine(cfg, inst, tmp_path, monkeypatch)
+    clock = [1000.0]
+    monkeypatch.setattr(E.time, "monotonic", lambda: clock[0])
+    eng.feed.connected = True
+    eng.feed.last_tick_at = t("09:07")                       # pre-open: the last tick is before 09:15
+    eng.now = lambda: t("09:15", 10)
+    eng._periodic()
+    assert eng.feed.restarts == 0                             # not stale yet: counted from the open
+    eng.now = lambda: t("10:00")                              # now really stale; restarts keep failing
+    gaps, last_restart = [], None
+    for step in range(0, 1200, 5):
+        clock[0] = 1000.0 + step
+        before = eng.feed.restarts
+        eng._periodic()
+        if eng.feed.restarts > before:
+            if last_restart is not None:
+                gaps.append(step - last_restart)
+            last_restart = step
+    assert gaps[:4] == [35, 65, 125, 245] and all(g <= 305 for g in gaps)   # 30 s, 1, 2, 4 min, then capped at 5
+    eng.feed.last_tick_at = t("10:00")                        # ticks flow again: back to normal and reset
+    eng._periodic()
+    assert eng._feed_wait == 0.0 and any("Price feed is back" in m for m in sent)

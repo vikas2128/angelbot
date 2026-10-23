@@ -506,6 +506,7 @@ registration. Confirm specifics with Angel One SmartAPI support; rules and broke
 | Telegram buttons show old behaviour | `systemctl --user restart angelbot-telegram@paper` after a `git pull` |
 | "No screener snapshot" in Telegram | no screen run yet in that area → `./deploy/ab paper screen` |
 | `AG8001 Invalid Token` loops | session expired (midnight); the bot re-logs in, restart the service if it persists |
+| `429 ... Connection Limit Exceeded` on the feed | too many live websocket connections for your client id: something else (another script, a second bot) holds one; the bot keeps one connection and backs off (30 s up to 5 min) while the broker refuses |
 | no ticks / feed restarts | market closed, wrong token for the exchange, or network → `journalctl --user -u angelbot@paper` |
 | `Instrument ... not found` | symbol typo or expired contract → `./deploy/ab paper instruments <name> --exchange NFO` |
 | bot didn't start | holiday, weekend or timer disabled → `systemctl --user list-timers 'angelbot@*'` |

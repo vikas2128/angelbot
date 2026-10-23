@@ -52,6 +52,7 @@ class Engine:
         self._last_status = 0.0
         self._last_control = 0.0
         self._last_feed_restart = 0.0
+        self._feed_wait = 0.0              # seconds before the next feed restart may happen (backs off while it fails)
         self.control = {"paused": False, "kill": False}
         self.exit_code = 0
         self._feed_alerted = False       # notification state only
@@ -242,8 +243,13 @@ class Engine:
         if not self.replay and at(now, "09:15") <= now <= at(now, "15:30"):
             stale = float(self.cfg.get("feed", {}).get("stale_after_sec", 30))
             last = self.feed.last_tick_at
-            dead = (not self.feed.connected) or last is None or (now - last).total_seconds() > stale
-            if dead and time.monotonic() - self._last_feed_restart > max(stale, 30):
+            ref = max(last, at(now, "09:15")) if last else at(now, "09:15")      # no ticks before the open are expected
+            dead = (not self.feed.connected) or (now - ref).total_seconds() > stale
+            base = max(stale, 30)
+            if dead and time.monotonic() - self._last_feed_restart > max(base, self._feed_wait):
+                # back off while restarts keep failing (30 s, 60 s, 2 min, 4 min, then every 5 min), so a broker
+                # that is refusing connections is not hammered; reset once ticks flow again
+                self._feed_wait = min(300.0, self._feed_wait * 2) if self._feed_wait else base
                 self._last_feed_restart = time.monotonic()
                 self.journal.event(now, "feed_restart", "stale/disconnected feed", "WARNING")
                 self._feed_alerted = True
@@ -252,6 +258,7 @@ class Engine:
                 self.feed.restart()
             elif not dead and self._feed_alerted:
                 self._feed_alerted = False
+                self._feed_wait = 0.0
                 notify.send(messages.feed_back())
 
         if self.replay or time.monotonic() - self._last_status > 2.0:
