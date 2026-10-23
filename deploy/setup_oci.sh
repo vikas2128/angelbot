@@ -89,4 +89,5 @@ Next:
   4. claude                            # in ~/angelbot — approve the 'angelbot' MCP server, try /status
 The timer starts the PAPER bot at 09:05 IST every weekday. Live is prepared but off (docs/ENVIRONMENTS.md).
 Logs: journalctl --user -u angelbot@paper -f     Status: ./deploy/ab paper status
+Optional phone app over Tailscale: docs/APP.md, then  bash deploy/app_setup.sh
 EOF

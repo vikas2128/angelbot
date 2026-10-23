@@ -20,6 +20,7 @@ Safety, by construction:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import asyncio
 import hashlib
 import hmac
@@ -517,6 +518,36 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
     return Starlette(routes=routes)
 
 
+CERT_WARN_DAYS = 14
+
+
+def check_cert(cert: str, key: str, name: str, now: datetime | None = None) -> int:
+    """The certificate must exist, cover `name` and not have expired; returns days left (alerting under 14)."""
+    from cryptography import x509
+    for path in (cert, key):
+        if not Path(path).is_file():
+            raise StartupError(f"missing {path}: run deploy/app_cert.sh paper (it uses tailscale cert)")
+    try:
+        c = x509.load_pem_x509_certificate(Path(cert).read_bytes())
+    except ValueError:
+        raise StartupError(f"{cert} is not a PEM certificate") from None
+    try:
+        names = c.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName)
+    except x509.ExtensionNotFound:
+        names = []
+    if name not in names:
+        raise StartupError(f"the certificate is for {', '.join(names) or 'no name'}, not {name}")
+    now = now or datetime.now(timezone.utc)
+    left = (c.not_valid_after_utc - now).days
+    if c.not_valid_after_utc <= now:
+        raise StartupError(f"the certificate expired on {c.not_valid_after_utc:%Y-%m-%d}: run deploy/app_cert.sh paper")
+    if left < CERT_WARN_DAYS:
+        from bot import notify
+        notify.send(f"⚠️ <b>App certificate expires in {left} days</b>. Renewal should run daily: check "
+                    "<code>systemctl --user status angelbot-tlscert@paper.timer</code>")
+    return left
+
+
 def origin_for(rp_id: str, port: int, dev: bool) -> str:
     scheme = "http" if dev else "https"
     default = 80 if dev else 443
@@ -543,12 +574,14 @@ def main(argv=None) -> None:
     rp_id = "localhost" if args.dev else (args.name or "")
     if not rp_id.endswith(".ts.net") and not args.dev:
         raise StartupError("--name must be this VM's Tailscale HTTPS name (ends in .ts.net): see tailscale status")
+    if not args.dev:
+        log.info("certificate valid for %d more days", check_cert(args.cert, args.key, rp_id))
     store = AuthStore(rp_id, origin_for(rp_id, args.port, args.dev))
     store.audit("api_started", detail=f"{rp_id}:{args.port}")
     pusher = Pusher(store)
     pusher.start()                                    # bot alerts -> push notifications
     import uvicorn
-    log.warning("app API (read-only) for the paper area on %s://%s:%d", "http" if args.dev else "https", host, args.port)
+    log.warning("app API for the paper area on %s://%s:%d", "http" if args.dev else "https", rp_id, args.port)
     uvicorn.run(create_app(store, tls=not args.dev, pusher=pusher), host=host, port=args.port, log_level="info",
                 ssl_certfile=None if args.dev else args.cert, ssl_keyfile=None if args.dev else args.key,
                 server_header=False, proxy_headers=False)

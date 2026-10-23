@@ -1,0 +1,13 @@
+# Renews the app's HTTPS certificate with `tailscale cert` (only fetches a new one when the old is close to expiry),
+# then restarts the API if it changed. Run daily by angelbot-tlscert@.timer. See docs/APP.md.
+[Unit]
+Description=AngelBot app certificate renewal (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/angelbot
+EnvironmentFile=%h/angelbot/profiles/%i.env
+EnvironmentFile=%h/angelbot/runtime/%i/app/api.env
+ExecStart=%h/angelbot/deploy/app_cert.sh %i

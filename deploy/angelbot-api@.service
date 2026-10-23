@@ -1,0 +1,40 @@
+# systemd USER template unit: the app's API for one area (paper only: the API refuses any other). See docs/APP.md.
+# Set up by deploy/app_setup.sh, which writes runtime/%i/app/api.env (address, name, port) and the certificate.
+#   systemctl --user enable --now angelbot-api@paper
+#   journalctl --user -u angelbot-api@paper -f
+[Unit]
+Description=AngelBot app API (%i), private over Tailscale
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/angelbot
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Kolkata
+# the area's profile (folders, Telegram bot for security alerts) and the API's own settings (not secret)
+EnvironmentFile=%h/angelbot/profiles/%i.env
+EnvironmentFile=%h/angelbot/runtime/%i/app/api.env
+ExecStart=%h/angelbot/.venv/bin/python -m bot.cli api --host ${ANGELBOT_API_HOST} --port ${ANGELBOT_API_PORT} \
+    --name ${ANGELBOT_API_NAME} --cert %h/angelbot/runtime/%i/app/tls/cert.pem --key %h/angelbot/runtime/%i/app/tls/key.pem
+Restart=on-failure
+RestartSec=10
+# Hardening: read-only system and home, writable only the area's runtime folder; no privilege gain; private /tmp;
+# only internet and local sockets; capped memory and CPU so it can never starve the trading bot.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/angelbot/runtime/%i %t
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+UMask=0077
+MemoryMax=400M
+CPUQuota=50%
+
+[Install]
+WantedBy=default.target

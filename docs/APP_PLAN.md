@@ -1,7 +1,6 @@
 # Build plan: AngelBot app (installable web app + private API over Tailscale)
 
-Status: **phases 0 to 6 built** (shared actions, alert outbox, read-only API, passkey login, actions, app screens,
-push notifications); phase 7 (deploy on the VM) not built.
+Status: **all phases built** (0 to 7). Install and use: [APP.md](APP.md). Not yet tried on a real phone and VM.
 The API is not installed as a service yet. Telegram stays on as the backup alert and control channel.
 
 Built so far:
@@ -33,6 +32,11 @@ Built so far:
   the API turns each new outbox alert into an encrypted push (RFC 8291) and never re-sends old ones after a restart;
   only the browsers' own push services are accepted as endpoints (Google, Apple, Mozilla, Microsoft); gone (404/410)
   and removed-device subscriptions are dropped; at most 3 per device. iPhone needs iOS 16.4+ and the home-screen app.
+- Deploy (phase 7): `deploy/angelbot-api@.service` (systemd sandbox: read-only system and home, writes only the area's
+  runtime folder, no privilege gain, memory and CPU caps; `app_setup.sh` falls back to limits only where user-namespace
+  sandboxing is unavailable), `deploy/angelbot-tlscert@.timer` + `app_cert.sh` (daily `tailscale cert`, restart on
+  change, Telegram alert on failure), `deploy/app_setup.sh` (one-time setup), the API checks the certificate's name and
+  expiry at start and warns on Telegram under 14 days.
 - `tests/test_api_real_server.py` runs the API under real uvicorn over the network (WebSocket and report included).
 - Tests use a software passkey that signs real WebAuthn responses, so the library's verification runs in full.
 

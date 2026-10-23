@@ -149,6 +149,18 @@ Then in Claude run `/mcp` (expect `angelbot` connected) and `/status`.
   if the laptop is lost.
 - With the separate-user setup, `pause_bot`/`resume_bot` fail by design (no write access to `runtime/`). Use Telegram.
 
+## 6b. With the phone app: SSH over Tailscale only (optional)
+
+Once Tailscale works on the VM and your laptop (docs/APP.md), you can stop exposing SSH to the internet:
+
+1. Add `"tcp:22"` to the access rule in docs/APP.md §1 and check `ssh ubuntu@<vm>.<tailnet>.ts.net` works from the
+   laptop **over Tailscale**, in a second terminal, before changing anything else.
+2. In the OCI console, remove the ingress rule for TCP 22 from the VM's security list.
+3. Keep a way back in that does not need Tailscale: OCI console → the instance → **Console connection** (serial
+   console). Test it once.
+
+The app API itself never listens on a public address: it refuses to start on anything but its Tailscale address.
+
 ## 7. What not to do in live mode
 
 - **Never run Claude Code with auto-accept / bypass-permissions on the VM.** Approvals are the last gate.

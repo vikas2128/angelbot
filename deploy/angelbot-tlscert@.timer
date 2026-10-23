@@ -1,0 +1,12 @@
+# Checks the app's certificate every day at 06:10 IST (Tailscale certificates last 90 days).
+#   systemctl --user enable --now angelbot-tlscert@paper.timer
+[Unit]
+Description=AngelBot app certificate renewal (%i), daily
+
+[Timer]
+OnCalendar=*-*-* 06:10:00 Asia/Kolkata
+Persistent=true
+Unit=angelbot-tlscert@%i.service
+
+[Install]
+WantedBy=timers.target

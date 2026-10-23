@@ -158,6 +158,8 @@ The services are systemd **user** units, one instance per area (`@paper`, `@live
 | `angelbot@paper.service` | the trading bot: one session per start; skips holidays, flattens at 15:12, exits about 15:32 |
 | `angelbot-telegram@paper.service` | Telegram commands and buttons; always on, independent of trading |
 | `angelbot-backtest@paper.timer` | backtests every screened stock at **15:45 IST, Mon–Fri**, for the backtest check (§5) |
+| `angelbot-api@paper.service` | the phone app and its API, private over Tailscale (optional, §4b) |
+| `angelbot-tlscert@paper.timer` | renews the app's HTTPS certificate daily (only with the app) |
 
 ### Paper
 
@@ -274,6 +276,22 @@ Tap a setting, then a value. Only fixed choices are offered, no typed values:
 - Claude sees the overrides too: the `get_config` and `validate_config` tools list them.
 
 ---
+
+### 4b. Phone app (optional)
+
+An installable app for your phone with the same information and controls as Telegram, live updates and push
+notifications. It runs on the VM and is reachable **only over Tailscale** (no new internet-facing port). Sign-in is by
+passkey (Face ID or fingerprint); each action asks again if your last check is over 2 minutes old; it cannot place
+orders or switch to live. Telegram stays on as the backup.
+
+```bash
+sudo tailscale up --advertise-tags=tag:angelbot      # after setting up your Tailscale account: docs/APP.md §1
+bash deploy/app_setup.sh                              # one time: certificate, service, prints the app's address
+./deploy/ab paper app enroll --name "My phone"        # a one-time code to register the phone
+```
+
+Then open the printed `https://<vm>.<tailnet>.ts.net:8443` on the phone (Tailscale on), register, and add it to the
+home screen. Full guide, lost-phone steps and troubleshooting: [docs/APP.md](docs/APP.md).
 
 ## 5. Stock screener (advisory)
 
@@ -524,9 +542,12 @@ bot/            engine, strategies, risk, orders, broker, paper, feed, backtest,
 mcp_server/     MCP server for Claude Code (.mcp.json registers it, on the paper area)
 config/         config.yaml (strategy, instruments, risk, session, execution, charges); universe/ (NSE index lists)
 profiles/       paper / live / research templates (*.env.example); the real *.env files are secret and git-ignored
-deploy/         setup_oci.sh, angelbot@.service/.timer, angelbot-telegram@.service, ab (area wrapper), split_journal.py
+deploy/         setup_oci.sh, angelbot@.service/.timer, angelbot-telegram@.service, angelbot-backtest@.service/.timer,
+                angelbot-api@.service, angelbot-tlscert@.service/.timer, app_setup.sh, app_cert.sh, ab (area wrapper),
+                split_journal.py
+app/            the phone app (installable web app): screens, service worker, icons
 skills/         angelbot-report: portable report builder for any agent
-docs/           ENVIRONMENTS.md (areas), HARDENING.md (VM security)
+docs/           ENVIRONMENTS.md (areas), HARDENING.md (VM security), APP.md (phone app), APP_PLAN.md (its design)
 .claude/        settings.json (permissions), commands/ (slash commands)   CLAUDE.md (Claude's rules)
 tests/          unit and integration tests (pytest)
 ```
