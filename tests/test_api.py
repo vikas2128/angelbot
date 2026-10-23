@@ -93,6 +93,7 @@ def test_status_settings_alerts(client):
     control.write_status({"state": "running", "mode": "paper", "positions": [], "strategy_state": {"TCS-EQ": {"bars": 30}}})
     s = client.get("/api/status", headers=AUTH).json()
     assert s["state"] == "running" and s["bot_alive"] and "control" in s and s["strategy_state"]["TCS-EQ"]["bars"] == 30
+    assert {"open", "session_over", "trading_day", "next_start"} <= set(s["market"])
     st = client.get("/api/settings", headers=AUTH).json()
     amount = next(x for x in st["settings"] if x["id"] == "amount")
     assert st["area"] == "paper" and amount["typed"] and any(c["current"] for c in amount["choices"])

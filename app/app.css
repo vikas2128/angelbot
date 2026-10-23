@@ -158,3 +158,19 @@ svg.i.tiny{width:13px;height:13px;color:var(--muted)}
 .panel .help{font-size:12.5px;color:var(--muted);margin:0;line-height:1.45}
 .panel .impact{font-size:12.5px;margin:0;padding:7px 10px;border-radius:8px;background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .banner.info{border-left-color:var(--accent)}
+/* strategy card */
+.sblocks{display:flex;flex-direction:column;margin-top:4px}
+.sblock{display:flex;flex-direction:column;gap:8px;padding:10px 0;border-bottom:.5px solid var(--line)}
+.sblock:last-child{border-bottom:0;padding-bottom:2px}
+.shead{display:flex;align-items:center;gap:6px;font-size:14px}.shead .grow,.snext .grow{flex:1;min-width:0}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+svg.strack{width:100%;height:auto;display:block;overflow:visible}
+svg.strack .rail{stroke:var(--line);stroke-width:4;stroke-linecap:round}
+svg.strack .mk{stroke-width:2.5;stroke-linecap:round}.strack .mk.buy{stroke:var(--ok)}.strack .mk.sell{stroke:var(--bad)}.strack .mk.mid{stroke:var(--muted)}
+svg.strack .tl{font-size:10px;fill:var(--muted);font-variant-numeric:tabular-nums}.strack .tl.buy{fill:var(--ok)}.strack .tl.sell{fill:var(--bad)}
+svg.strack .dot{fill:var(--accent);stroke:var(--panel);stroke-width:2}
+svg.sprog{width:100%;height:6px;display:block}svg.sprog .rail{fill:var(--line)}svg.sprog .fill{fill:var(--accent)}
+.snext{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.snext .tag{font-size:10px;font-weight:700;letter-spacing:.04em;border-radius:5px;padding:2px 6px;background:var(--chip)}
+.snext .tag.buy{color:var(--ok)}.snext .tag.sell{color:var(--bad)}.snext .tag.done{color:var(--muted)}
+.snext .away{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}

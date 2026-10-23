@@ -49,7 +49,7 @@ from bot import settings as ST
 from bot.api_auth import COOKIE, SESSION_TTL, AuthError, AuthStore, _esc
 from bot.api_push import Pusher, PushError
 from bot.journal import query_readonly
-from bot.timeutil import now_ist
+from bot.timeutil import market_clock, now_ist
 
 log = logging.getLogger("angelbot.api")
 
@@ -144,9 +144,24 @@ def check_bind(host: str, dev: bool) -> None:
 
 
 # ───────────────────────────── data (read-only) ─────────────────────────────
+_SESSION: dict = {}
+
+
+def _session_cfg() -> dict:
+    """config.yaml's session block (holidays, shutdown), re-read only when the file changes."""
+    try:
+        mtime = C.CONFIG_PATH.stat().st_mtime
+        if _SESSION.get("mtime") != mtime:
+            _SESSION.update(mtime=mtime, session=C.load_config().get("session") or {})
+    except Exception as e:                                # a bad config must not break the status screen
+        log.warning("session config unreadable: %s", e)
+    return _SESSION.get("session") or {}
+
+
 def status_payload() -> dict:
     s = control.read_status()
     s["control"] = control.read_control()
+    s["market"] = market_clock(now_ist(), _session_cfg())
     return s
 
 

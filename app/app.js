@@ -141,7 +141,7 @@ function connectLive() {
   if (state.ws) return;
   const ws = new WebSocket(location.origin.replace(/^http/, 'ws') + '/ws');
   state.ws = ws;
-  ws.onopen = () => { state.wsTry = 0; setConn('ok', 'live'); stopPoll(); };
+  ws.onopen = () => { state.wsTry = 0; setConn('ok', 'connected'); stopPoll(); };
   ws.onmessage = ev => {
     try { const m = JSON.parse(ev.data); if (m.type === 'status') { state.status = m.status; if (state.tab === 'home') renderHome(); } } catch (_) {}
   };
@@ -201,29 +201,83 @@ async function showSignIn() {
 }
 
 // ───────────────────────────── home ─────────────────────────────
-function strategyLines(sym, st) {
-  if (!st) return [];
-  if (st.strategy && Object.keys((state.status || {}).strategies || {}).length > 1) sym = `${sym} (${STRATEGY_NAMES[st.strategy] || st.strategy})`;
-  if (st.error) return [`${sym}: strategy state unavailable`];
+// one block per stock: name and price, the strategy's numbers, a track of the levels, and what would trigger next
+const STRAT_SHORT = { ema_cross: 'EMA', orb: 'ORB', vwap_revert: 'VWAP' };
+function levelTrack(px, marks) {
+  const vals = [px, ...marks.map(m => m.v)].filter(v => Number.isFinite(v));
+  if (vals.length < 2) return null;
+  const lo = Math.min(...vals), hi = Math.max(...vals), pad = (hi - lo) * 0.25 || hi * 0.002;
+  const W = 300, x = v => 12 + (v - lo + pad) / (hi - lo + 2 * pad) * (W - 24);
+  const anchor = xx => xx < 50 ? 'start' : xx > W - 50 ? 'end' : 'middle';
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} 44`, class: 'strack', role: 'img', 'aria-label': 'price against the signal levels' });
+  svg.append(svgEl('line', { x1: 6, x2: W - 6, y1: 22, y2: 22, class: 'rail' }));
+  for (const m of marks) {
+    if (!Number.isFinite(m.v)) continue;
+    const xx = x(m.v);
+    svg.append(svgEl('line', { x1: xx, x2: xx, y1: 15, y2: 29, class: 'mk ' + m.kind }),
+      svgEl('text', { x: xx, y: 10, 'text-anchor': anchor(xx), class: 'tl ' + m.kind }, m.label));
+  }
+  if (Number.isFinite(px)) {
+    const xx = x(px);
+    svg.append(svgEl('circle', { cx: xx, cy: 22, r: 5, class: 'dot' }),
+      svgEl('text', { x: xx, y: 42, 'text-anchor': anchor(xx), class: 'tl' }, price(px)));
+  }
+  return svg;
+}
+function progressBar(done, need) {
+  const svg = svgEl('svg', { viewBox: '0 0 300 8', class: 'sprog', preserveAspectRatio: 'none', role: 'img', 'aria-label': `${done} of ${need} bars` });
+  svg.append(svgEl('rect', { x: 0, y: 0, width: 300, height: 8, rx: 4, class: 'rail' }),
+    svgEl('rect', { x: 0, y: 0, width: Math.max(8, 300 * Math.min(1, done / need)), height: 8, rx: 4, class: 'fill' }));
+  return svg;
+}
+function nextRow(kind, text, away) {
+  return h('div', { class: 'snext' }, h('span', { class: 'tag ' + kind, text: kind === 'buy' ? 'BUY' : kind === 'sell' ? 'SELL' : 'DONE' }),
+    h('span', { class: 'grow', text }), away != null ? h('span', { class: 'away', text: `${Math.abs(away).toFixed(2)}% away` }) : null);
+}
+function strategyBlock(sym, st, { live, px, multi }) {
+  const name = st.strategy || '';
+  const head = h('div', { class: 'shead' }, h('b', { text: sym.replace(/-EQ$/, '') }),
+    multi && name ? h('span', { class: 'pill plain', text: STRAT_SHORT[name] || name }) : null,
+    h('span', { class: 'grow' }), h('span', { class: 'small muted', text: `${st.bars || 0} bars` + (Number.isFinite(px) ? ` · ${price(px)}` : '') }));
+  if (st.error) return h('div', { class: 'sblock' }, head, h('p', { class: 'muted small m0', text: 'Strategy state unavailable' }));
   const bars = st.bars || 0, need = st.needed || 0;
-  if (need && bars < need) return [`${sym}: warming up, ${bars} of ${need} one-minute bars`];
+  if (need && bars < need) return h('div', { class: 'sblock' }, head,
+    h('p', { class: 'small m0', text: `Warming up: ${bars} of ${need} one-minute bars` }), progressBar(bars, need));
+  const parts = [head];
   if ('fast_ema' in st) {
-    const rel = st.fast_above ? 'above' : 'below';
-    const out = [`${sym} · ${bars} bars · fast avg ${price(st.fast_ema)} ${rel} slow avg ${price(st.slow_ema)} (${pct(st.gap_pct)})`];
-    if (st.cross_move_pct != null) out.push(`${st.next_signal === 'buy' ? 'Buy signal' : 'Sell/exit signal'} if a minute closes ` +
-      `${st.next_signal === 'buy' ? 'above' : 'below'} ${price(st.cross_price)} (${pct(st.cross_move_pct)} from now)`);
-    return out;
-  }
-  if ('range_high' in st) {
-    if (!st.range_done) return [`${sym}: building the opening range (${price(st.range_low)} to ${price(st.range_high)} so far)`];
+    const cur = Number.isFinite(px) ? px : (st.cross_price != null ? st.cross_price / (1 + st.cross_move_pct / 100) : NaN);
+    parts.push(h('div', { class: 'grid3' }, stat('Fast avg', price(st.fast_ema)), stat('Slow avg', price(st.slow_ema)),
+      stat('Gap', pct(st.gap_pct), st.fast_above ? 'up' : 'dn')),
+      h('p', { class: 'small muted m0', text: st.fast_above ? 'Fast average is above the slow one (up trend)' : 'Fast average is below the slow one (down trend)' }));
+    if (live && st.cross_move_pct != null) {
+      const k = st.next_signal === 'buy' ? 'buy' : 'sell';
+      parts.push(levelTrack(cur, [{ v: st.cross_price, label: k === 'buy' ? 'buy' : 'sell/exit', kind: k }]),
+        nextRow(k, `if a minute closes ${k === 'buy' ? 'above' : 'below'} ${price(st.cross_price)}`, st.cross_move_pct));
+    }
+  } else if ('range_high' in st) {
     const f = st.fired || [];
-    return [`${sym} · opening range ${price(st.range_low)} to ${price(st.range_high)}`,
-      [f.includes(1) ? 'buy already taken today' : `buy above ${price(st.buy_above)}`,
-       f.includes(-1) ? 'sell already taken today' : `sell below ${price(st.sell_below)}`].join(' · ')];
+    if (!st.range_done) parts.push(h('p', { class: 'small m0', text: `Building the opening range: ${price(st.range_low)} to ${price(st.range_high)} so far` }));
+    else {
+      parts.push(h('div', { class: 'grid3' }, stat('Range low', price(st.range_low)), stat('Range high', price(st.range_high)),
+        stat('Width', pct((st.range_high - st.range_low) / st.range_low * 100).replace('+', ''))));
+      if (live) {
+        parts.push(levelTrack(px, [{ v: st.sell_below, label: 'sell', kind: 'sell' }, { v: st.buy_above, label: 'buy', kind: 'buy' }]));
+        const away = v => Number.isFinite(px) ? (v - px) / px * 100 : null;
+        parts.push(f.includes(1) ? nextRow('done', 'Buy already taken today') : nextRow('buy', `if a minute closes above ${price(st.buy_above)}`, away(st.buy_above)),
+          f.includes(-1) ? nextRow('done', 'Sell already taken today') : nextRow('sell', `if a minute closes below ${price(st.sell_below)}`, away(st.sell_below)));
+      }
+    }
+  } else if ('vwap' in st) {
+    parts.push(h('div', { class: 'grid3' }, stat('VWAP', price(st.vwap)), stat('From VWAP', pct(st.dev_pct), st.dev_pct > 0 ? 'up' : st.dev_pct < 0 ? 'dn' : ''),
+      stat('Band', `±${((st.sell_above - st.vwap) / st.vwap * 100).toFixed(2)}%`)));
+    if (live) {
+      const away = v => Number.isFinite(px) ? (v - px) / px * 100 : null;
+      parts.push(levelTrack(px, [{ v: st.buy_below, label: 'buy', kind: 'buy' }, { v: st.vwap, label: 'VWAP', kind: 'mid' }, { v: st.sell_above, label: 'sell', kind: 'sell' }]),
+        nextRow('buy', `if a minute closes below ${price(st.buy_below)}`, away(st.buy_below)),
+        nextRow('sell', `if a minute closes above ${price(st.sell_above)}`, away(st.sell_above)));
+    }
   }
-  if ('vwap' in st) return [`${sym} · VWAP ${price(st.vwap)}, price ${pct(st.dev_pct)} from it`,
-    `buy below ${price(st.buy_below)} · sell above ${price(st.sell_above)}`];
-  return [`${sym} · ${bars} bars`];
+  return h('div', { class: 'sblock' }, ...parts);
 }
 const STRATEGY_NAMES = { ema_cross: 'EMA crossover', orb: 'Opening range breakout', vwap_revert: 'VWAP reversion' };
 function perStockTitle(s) {
@@ -231,21 +285,44 @@ function perStockTitle(s) {
   if (names.length > 1) return 'Strategy per stock';
   return STRATEGY_NAMES[names[0] || String(s.strategy || '').split('(')[0]] || 'Strategy';
 }
+const istToday = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// '2026-10-26' → 'today' / 'tomorrow' / 'Mon 26 Oct' (dates are IST, as the server sends them)
+function dayName(day) {
+  const today = istToday(), tomorrow = new Date(Date.parse(today + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10);
+  if (day === today) return 'today';
+  if (day === tomorrow) return 'tomorrow';
+  const d = new Date(day + 'T12:00:00Z');
+  return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+const startText = iso => iso ? `${dayName(iso.slice(0, 10))} ${iso.slice(11, 16)}` : '';
 function stat(label, value, klass = '') { return h('div', { class: 'stat' }, h('div', { class: 'l', text: label }), h('div', { class: 'v ' + klass, text: value })); }
 function renderHome() {
   if (state.tab !== 'home') return;
   const s = state.status || {}, ctl = s.control || {}, view = $('#view');
-  const alive = !!s.bot_alive, mode = (s.mode || 'paper').toUpperCase();
+  const alive = !!s.bot_alive, mode = (s.mode || 'paper').toUpperCase(), m = s.market || {}, today = istToday();
+  const sessionDay = String(s.written_at || '').slice(0, 10), stale = !!sessionDay && sessionDay !== today;
+  const startsToday = String(m.next_start || '').slice(0, 10) === today;
+  // a stopped bot is normal outside its session; only during the session is it a problem
+  const [botPill, botKind] = alive ? ['Running', 'ok'] : startsToday ? [`Starts ${String(m.next_start).slice(11, 16)}`, 'off']
+    : (m.session_over || !m.trading_day) ? ['Done for the day', 'off'] : ['Not running', 'bad'];
   const hero = h('div', { class: 'card hero' },
     h('div', { class: 'row' },
-      h('span', { class: 'pill ' + (alive ? 'ok' : 'off'), text: alive ? 'Running' : 'Not running' }),
+      h('span', { class: 'pill ' + botKind, text: botPill }),
       h('span', { class: 'pill plain ' + (mode === 'LIVE' ? 'bad' : 'off'), text: mode === 'LIVE' ? 'LIVE · real money' : `${mode} · simulated` })),
     h('div', { class: 'pnl ' + cls(s.day_pnl), text: inr(s.day_pnl) }),
-    h('div', { class: 'meta', text: `Today after fees · ${s.trades_today || 0} trade${s.trades_today === 1 ? '' : 's'} · fees ${price(s.charges_today || 0)}` +
+    h('div', { class: 'meta', text: `${stale ? 'Last session, ' + dayName(sessionDay) + ',' : 'Today'} after fees · ${s.trades_today || 0} trade${s.trades_today === 1 ? '' : 's'} · fees ${price(s.charges_today || 0)}` +
       (s.written_at ? ` · ${hhmm(s.written_at)}` : '') }));
   const flags = [];
-  if (s.halted_reason) flags.push(h('div', { class: 'banner bad', text: `Stopped for today: ${s.halted_reason}` }));
-  if (s.cooldown_until) flags.push(h('div', { class: 'banner', text: `Resting after losses until ${hhmm(s.cooldown_until)}` }));
+  if (!alive && m.next_start) {
+    const kind = botKind === 'bad' ? 'bad' : 'info';
+    const text = botKind === 'bad' ? `The bot isn't running during its session. Next scheduled start ${startText(m.next_start)}.`
+      : `${m.open ? 'Market open' : 'Market closed'} · the bot starts ${startText(m.next_start)}`;
+    flags.push(h('div', { class: 'banner ' + kind, text }));
+  }
+  if (s.halted_reason && !stale) flags.push(h('div', { class: 'banner bad', text: `Stopped for today: ${s.halted_reason}` }));
+  if (alive && s.cooldown_until && Date.parse(s.cooldown_until) > Date.now()) flags.push(h('div', { class: 'banner', text: `Resting after losses until ${hhmm(s.cooldown_until)}` }));
   if (ctl.paused) flags.push(h('div', { class: 'banner', text: 'New entries are paused' }));
   if (ctl.kill) flags.push(h('div', { class: 'banner bad', text: 'Emergency stop is set. Resume before the next session.' }));
   const feed = s.feed || {};
@@ -254,29 +331,34 @@ function renderHome() {
   const posCards = pos.length ? pos.map(p => positionCard(p, s)) : [h('div', { class: 'card' },
     h('h2', { class: 'm0', text: 'Position' }), h('p', { class: 'muted m0 mt8 small', text: 'No open position' }))];
   const strat = Object.entries(s.strategy_state || {});
-  const ltp = Object.entries(s.ltp || {}).map(([k, v]) => `${k.replace(/-EQ$/, '')} ${price(v)}`).join(' · ');
+  // a stopped bot's averages are the last session's; the "signal if…" lines would only mislead until new bars arrive
+  const asOf = alive ? '' : `${stale ? dayName(sessionDay) + ', a' : 'A'}s of ${s.written_at ? hhmm(s.written_at) : 'the close'}`;
+  const multi = new Set(Object.values(s.strategies || {}).map(v => String(v).split('(')[0])).size > 1;
   const stratCard = h('div', { class: 'card' },
-    h('div', { class: 'row' }, h('h2', { class: 'm0', text: perStockTitle(s) }), ltp ? h('span', { class: 'small muted', text: ltp }) : null),
-    strat.length ? h('ul', { class: 'lines mt8' }, strat.flatMap(([sym, st]) => strategyLines(sym, st)).map((t, i) => h('li', { class: i % 2 ? 'sub' : '', text: t })))
+    h('div', { class: 'row' }, h('h2', { class: 'm0', text: perStockTitle(s) }), asOf ? h('span', { class: 'pill plain off', text: 'last session' }) : null),
+    asOf ? h('p', { class: 'hint', text: asOf + '. The next trigger shows again once the bot runs.' }) : null,
+    strat.length ? h('div', { class: 'sblocks' }, strat.map(([sym, st]) => strategyBlock(sym, st || {}, { live: alive, px: Number((s.ltp || {})[sym]), multi })))
       : h('p', { class: 'muted m0 mt8 small', text: (s.instruments || []).join(', ') || 'No data yet' }));
   const btn = (name, text, klass, fn) => h('button', { class: 'btn ' + klass, onclick: async ev => {
     const b = ev.currentTarget; b.disabled = true;
     try { await fn(); } catch (e) { toast(errText(e, 'Cancelled')); } finally { b.disabled = false; }
   } }, icon(name), text);
+  // Restart and Stop only act on a running bot; Pause/Resume is saved and also applies to the next start
   const controls = h('div', { class: 'card' }, h('h2', { text: 'Controls' }), h('div', { class: 'ctl' },
-    ctl.paused ? btn('play', 'Resume', 'primary', async () => { await act('/api/control/resume'); toast('Resumed: new trades allowed'); refreshStatus(); })
-               : btn('pause', 'Pause', '', async () => { await act('/api/control/pause'); toast('Paused: no new trades'); refreshStatus(); }),
-    btn('restart', 'Restart', '', async () => {
+    (ctl.paused || ctl.kill) ? btn('play', 'Resume', 'primary', async () => { await act('/api/control/resume'); toast('Resumed: new trades allowed'); refreshStatus(); })
+               : btn('pause', 'Pause', '', async () => { await act('/api/control/pause'); toast(alive ? 'Paused: no new trades' : 'Paused: the next start takes no new trades'); refreshStatus(); }),
+    alive && btn('restart', 'Restart', '', async () => {
       if (!confirm('Restart the paper bot now? Only works with no open position.')) return;
       await act('/api/control/restart'); toast('Restarting the paper bot…');
     }),
-    btn('stop', 'Stop', 'danger', async () => {
+    alive && btn('stop', 'Stop', 'danger', async () => {
       if (!confirm('Emergency stop: cancel waiting entries, close ALL positions and stop the bot?')) return;
       const ask = await act('/api/control/kill/ask');
       if (!confirm('Are you sure? This cannot be undone from here today.')) return;
       await act('/api/control/kill/confirm', { confirm: ask.confirm }); toast('Emergency stop set'); refreshStatus();
     })),
-    h('p', { class: 'hint', text: 'Actions ask for Face ID if your last check is over 2 minutes old. Stop is the emergency stop.' }));
+    h('p', { class: 'hint', text: alive ? 'Actions ask for Face ID if your last check is over 2 minutes old. Stop is the emergency stop.'
+      : `The bot is stopped, so Restart and Stop are hidden. Pause or Resume now applies when it starts ${startText(m.next_start) || 'next'}.` }));
   view.replaceChildren(hero, ...flags, ...posCards, stratCard, controls);
 }
 // ───────────────────────────── position card with its candle chart ─────────────────────────────
