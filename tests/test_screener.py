@@ -299,3 +299,17 @@ def test_strategy_check_tab_shows_the_walk_forward():
     assert "Strategy check" in page and "1 of 2 stocks passed: S0" in page
     assert "S0</b> → <b class=\"up\">orb</b>" in page and "S1</b> → none" in page and "older / newer" in page
     assert "Strategy check (run 10-21 15:47): 1 of 2 stocks passed: S0 orb" in summary_html(snap)
+
+
+def test_a_screen_from_older_settings_says_so():
+    snap, _ = _sel_snap()
+    snap["params"]["top_n"] = 3
+    snap["lists"] = []                                        # this morning: built-in 20 stocks, 3 picks
+    cfg = {"selection": {"mode": "auto", "top_n": 5}, "screener": {"universe": ["nifty50", "banknifty"]}}
+    page, msg = render_html(snap, None, cfg), summary_html(snap, cfg=cfg)
+    assert "ran with earlier settings (3 picks, now 5; a hand-picked list of stocks, now Nifty 50 + Bank Nifty)" in page
+    assert "./deploy/ab paper screen" in page and "earlier settings" in msg
+    snap["params"]["top_n"] = 5
+    snap["lists"] = [{"name": "nifty50", "title": "Nifty 50", "tag": "N50", "count": 50},
+                     {"name": "banknifty", "title": "Bank Nifty", "tag": "BANK", "count": 14}]
+    assert "earlier settings" not in render_html(snap, None, cfg)                      # same settings: no note

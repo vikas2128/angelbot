@@ -139,6 +139,28 @@ def how_it_works(p: dict) -> list[str]:
          if p.get("backtest_gate") and not p.get("strategy_per_stock") else [])
 
 
+def settings_changed(snap: dict, cfg: dict | None) -> str | None:
+    """A note when this screen ran with other settings than today's (picks count or the lists screened)."""
+    if not cfg:
+        return None
+    from bot import universe as U
+    from bot.screener import params_from
+    now_n = int(params_from(cfg)["top_n"])
+    then_n = int((snap.get("params") or {}).get("top_n") or now_n)
+    entries = list((cfg.get("screener") or {}).get("universe") or [])
+    now_lists = list(dict.fromkeys(filter(None, (U.canonical(str(e)) for e in entries))))   # config order, no repeats
+    then_lists = [x["name"] for x in snap.get("lists") or []]
+    diffs = []
+    if now_n != then_n:
+        diffs.append(f"{then_n} picks, now {now_n}")
+    if sorted(now_lists) != sorted(then_lists):
+        diffs.append(f"{lists_text(snap)}, now {' + '.join(U.PRESETS[n]['title'] for n in now_lists) or 'a hand-picked list'}")
+    if not diffs:
+        return None
+    return ("This screen ran with earlier settings (" + "; ".join(diffs) + "). The next screen uses your current "
+            "settings: the next trading morning at 09:16, or now with  ./deploy/ab paper screen  on the VM.")
+
+
 def decision_text(snap: dict, decision: dict | None) -> str | None:
     """What the bot decided this morning, if the decision is for this snapshot's day."""
     d = decision or {}
@@ -154,7 +176,7 @@ def decision_text(snap: dict, decision: dict | None) -> str | None:
     return f"Trading today (decided {when}, {who}): {names}."
 
 
-def render_html(snap: dict, decision: dict | None = None) -> str:
+def render_html(snap: dict, decision: dict | None = None, cfg: dict | None = None) -> str:
     p = snap["params"]
     ok = [r for r in snap["rows"] if not r["excluded"]]
     bad = [r for r in snap["rows"] if r["excluded"]]
@@ -236,12 +258,14 @@ def render_html(snap: dict, decision: dict | None = None) -> str:
            + "".join(f"<li>{esc(t)}</li>" for t in how_it_works(p)) + "</ul></section>")
     gen = str(snap.get("generated_at", ""))
     decided = decision_text(snap, decision)
+    older = settings_changed(snap, cfg)
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
             f'<title>AngelBot screener {esc(snap.get("market_date", ""))}</title><style>{CSS}{tab_css}</style></head><body><div class="wrap">'
             f'<header><h1>Stock screener</h1><p class="sub">{esc(date_label(snap))} · checked {snap["universe"]} stocks · '
             f'{snap["eligible"]} passed the gates · built {esc(gen[11:16])} IST</p>'
             f'<p class="sub">Screened: {esc(lists_text(snap))}</p></header>'
-            + (f'<div class="banner decided"><i></i><span><b>{esc(decided)}</b></span></div>' if decided else "") +
+            + (f'<div class="banner decided"><i></i><span><b>{esc(decided)}</b></span></div>' if decided else "")
+            + (f'<div class="banner"><i></i><span>{esc(older)}</span></div>' if older else "") +
             f'<div class="banner"><i></i><span>The screener places no orders. With morning selection on, the bot trades the '
             f'top {int(p["top_n"])} that passed the checks; the score only orders them and has not been backtested itself.</span></div>'
             f'<section><div class="picks">{cards}</div></section>{tabs_html}{errs}{how}'
@@ -323,7 +347,7 @@ def strategy_tables(sc: dict) -> str:
             f'<div class="scroll"><table><thead><tr><th>Stock</th>{head}</tr></thead><tbody>{body}</tbody></table></div>')
 
 
-def summary_html(snap: dict, today: str | None = None, decision: dict | None = None) -> str:
+def summary_html(snap: dict, today: str | None = None, decision: dict | None = None, cfg: dict | None = None) -> str:
     """Short Telegram message (HTML) with the top picks."""
     ok = [r for r in snap["rows"] if not r["excluded"]]
     n = int(snap["params"]["top_n"])
@@ -334,6 +358,9 @@ def summary_html(snap: dict, today: str | None = None, decision: dict | None = N
     decided = decision_text(snap, decision)
     if decided:
         lines.append(f"<b>{esc(decided)}</b>")
+    older = settings_changed(snap, cfg)
+    if older:
+        lines.append(f"⚠️ {esc(older)}")
     if not ok:
         lines.append("No stock passed the gates.")
     for r in ok[:n]:

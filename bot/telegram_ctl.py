@@ -190,8 +190,12 @@ def build_screen_file(out_dir: Path) -> tuple[Path, str]:
                          f"./deploy/ab {os.environ.get('ANGELBOT_PROFILE') or 'paper'} screen")
     path = out_dir / f"angelbot-screener-{snap.get('market_date', 'latest')}.html"
     decision = control.read_json(control.SEL_STATE)              # what the bot decided this morning, if anything
-    path.write_text(SR.render_html(snap, decision))
-    return path, SR.summary_html(snap, now_ist().strftime("%Y-%m-%d"), decision)
+    try:
+        cfg = ST.load()                                         # to say so when this screen used older settings
+    except Exception:
+        cfg = None
+    path.write_text(SR.render_html(snap, decision, cfg))
+    return path, SR.summary_html(snap, now_ist().strftime("%Y-%m-%d"), decision, cfg)
 
 
 def apply_choice(arg: str, today: str) -> str:
