@@ -579,11 +579,22 @@ async function notifyCard() {
 
 // ───────────────────────────── settings and devices ─────────────────────────────
 // Settings: grouped, plain words, only what applies now, and what a choice means in rupees (from the server's guide)
+const settingsCache = { data: null };
+// Load from the server (opening the tab, or after a change), then draw. Opening and closing a setting only redraws.
 async function renderSettings(openId) {
+  try {
+    const [d, devs, me] = await Promise.all([get('/api/settings'), get('/auth/devices'), get('/auth/me')]);
+    settingsCache.data = { d, devs, me };
+  } catch (e) {
+    if (!settingsCache.data) { $('#view').replaceChildren(h('div', { class: 'banner', text: errText(e, 'Could not load settings') })); return; }
+    toast(errText(e, 'Could not refresh settings'));             // keep showing what we have
+  }
+  return drawSettings(openId);
+}
+async function drawSettings(openId) {
+  if (state.tab !== 'settings' || !settingsCache.data) return;
   const view = $('#view');
-  let d, devs, me;
-  try { [d, devs, me] = await Promise.all([get('/api/settings'), get('/auth/devices'), get('/auth/me')]); }
-  catch (e) { view.replaceChildren(h('div', { class: 'banner', text: e.message })); return; }
+  const { d, devs, me } = settingsCache.data;
   const save = async body => {
     try { const r = await act('/api/settings/set', body); toast(`Saved: ${r.new}. ${d.applies}`); renderSettings(openId); }
     catch (e) { toast(errText(e, 'Not saved')); }
@@ -599,7 +610,7 @@ async function renderSettings(openId) {
       if (s.hidden) { hidden.push([s.label, s.note]); continue; }
       const open = openId === s.id;
       card.append(h('button', { class: 'setting' + (open ? ' open' : ''), 'aria-expanded': open ? 'true' : 'false',
-        onclick: () => renderSettings(open ? null : s.id) },
+        onclick: () => drawSettings(open ? null : s.id) },
         h('span', { class: 'lab' }, s.label, s.changed ? h('span', { class: 'badge', text: 'Changed' }) : null),
         h('span', { class: 'v' }, s.value, icon(open ? 'down' : 'chevron'))));
       if (!open) continue;

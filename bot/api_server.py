@@ -53,7 +53,7 @@ from bot.timeutil import now_ist
 
 log = logging.getLogger("angelbot.api")
 
-READS_PER_MIN = 30
+READS_PER_MIN = 120       # per device; a screen can make a few reads at once
 ACTIONS_PER_MIN = 10
 KILL_CONFIRM_SEC = 60
 WS_PUSH_SEC = 2.0
