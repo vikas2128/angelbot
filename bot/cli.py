@@ -409,7 +409,8 @@ def main(argv=None):
     if args.cmd in ("run", "screen", "status") and not os.environ.get("ANGELBOT_PROFILE") and not args.__dict__.get("replay"):
         print("note: ANGELBOT_PROFILE is not set, so this uses the legacy runtime/ folder. "
               "Use ./deploy/ab <paper|live|research> ... to pick an area.", file=sys.stderr)
-    cfg = C.load_config(Path(args.config) if args.config else None)
+    from bot import settings
+    cfg = settings.load(Path(args.config) if args.config else None)     # config.yaml + this area's Telegram settings
     handlers = {"check": cmd_check, "run": cmd_run, "fetch": cmd_fetch, "backtest": cmd_backtest,
                 "instruments": cmd_instruments, "sample-data": cmd_sample, "screen": cmd_screen, "universe": cmd_universe,
                 "telegram-test": cmd_telegram_test}

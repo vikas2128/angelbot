@@ -33,6 +33,7 @@ if "ANGELBOT_RUNTIME" not in os.environ:
 
 from bot import config as C  # noqa: E402
 from bot import control  # noqa: E402
+from bot import settings as ST  # noqa: E402
 from bot.journal import query_readonly  # noqa: E402
 
 try:  # MCP Python SDK v2
@@ -63,7 +64,7 @@ def _safe(fn):
 
 
 def _cfg() -> dict:
-    return C.load_config()
+    return ST.load()
 
 
 # ───────────────────────────── read ─────────────────────────────
@@ -145,8 +146,14 @@ def tail_log(lines: int = 100, contains: str | None = None) -> str:
 
 @mcp.tool()
 def get_config() -> str:
-    """Current config/config.yaml text (strategy, risk, session, instruments)."""
-    return C.CONFIG_PATH.read_text()
+    """Current config/config.yaml text (strategy, risk, session, instruments), plus the settings changed from
+    Telegram for this area (runtime/<area>/settings.yaml), which override config.yaml."""
+    text = C.CONFIG_PATH.read_text()
+    lines = ST.summary()
+    if lines:
+        text += ("\n# ── Overridden from Telegram for this area (runtime settings.yaml; these win over the values above) ──\n"
+                 + "".join(f"#   {l}\n" for l in lines))
+    return text
 
 
 @mcp.tool()
@@ -154,8 +161,8 @@ def validate_config() -> dict:
     """Validate config/config.yaml after editing it. The bot reads config at start-up, so
     changes apply from the next session (or after `systemctl --user restart angelbot`)."""
     try:
-        cfg = C.load_config()
-        return {"valid": True, "strategy": cfg["strategy"]["name"],
+        cfg = ST.load()
+        return {"valid": True, "telegram_overrides": ST.summary(), "strategy": cfg["strategy"]["name"],
                 "instruments": [i["symbol"] for i in cfg["instruments"]]}
     except Exception as e:
         return {"valid": False, "error": str(e)}

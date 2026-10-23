@@ -216,12 +216,38 @@ rejected orders, feed lost and back, loss cooldown, end-of-day summary. Commands
 | `/kill` · 🛑 Emergency stop | close everything and stop; asks for confirmation, valid for 60 seconds |
 | `/report [all\|session\|replay] [YYYY-MM-DD]` · 📄 Report | standalone HTML report with **Today** and **Month** tabs, sent as a file |
 | `/screen` · 🔎 Screener | latest screener picks plus the full ranking as an HTML file (no broker calls) |
+| `/settings` · ⚙️ Settings | change selection, shares, universe, strategy, risk and exits (below) |
 | `/log` · `/menu` · `/help` | last 20 log lines, buttons, help |
 
 No order placement and no paper → live switching through Telegram, by design. Commands sent while the controller was
 down are discarded on restart, so a stale `/kill` can't fire later. If a token leaks, `/revoke` it in BotFather.
 The report and screener files work without JavaScript; if a tab does not respond in Telegram's preview, open the file in
 your phone's browser.
+
+### Settings from Telegram (⚙️ Settings)
+
+Tap a setting, then a value. Only fixed choices are offered, no typed values:
+
+| Setting | Choices |
+|---|---|
+| Selection mode / picks to trade | off · auto · confirm / 1 · 2 · 3 |
+| Shares for a picked stock / for my list | 1 · 2 · 5 · 10 · 20 · 50 |
+| Stocks to screen | built-in 20 · Nifty 50 · Bank Nifty · Nifty 50 + Bank Nifty |
+| Strategy | ema_cross · orb · vwap_revert |
+| Max daily loss / max trades per day | ₹250 to ₹5,000 / 3 · 5 · 10 · 20 |
+| Stop loss / target | 0.2–1.0% / 0.3–2.0% |
+
+- Changes are saved in `runtime/<area>/settings.yaml`, **not** in `config/config.yaml`, and win over it for that area
+  only: a change in the Paper bot never touches research or live. ✏️ marks a changed value; **↩️ Reset all** goes back
+  to config.yaml. The file keeps the last 20 changes.
+- Every change is validated on the whole config first; an invalid one is refused and nothing is saved.
+- Changes apply from the **next start**. The start alert lists the settings changed in Telegram.
+- **🔄 Restart bot now** (paper only) applies them at once. It is offered only while the bot runs with **no open position
+  and no waiting order** (a paper position lives only in the bot's memory), asks to confirm within a minute, and checks
+  again before restarting. After a restart today's picked stocks are kept (a new mode or number of picks fully applies
+  tomorrow), and the day's trade count and loss limit start again from zero.
+- Not changeable here, on purpose: paper/live mode, orders per second, order type, the order cap, session times.
+- Claude sees the overrides too: the `get_config` and `validate_config` tools list them.
 
 ---
 
@@ -415,6 +441,8 @@ registration. Confirm specifics with Angel One SmartAPI support; rules and broke
 | `Failed to load environment files` | `profiles/<area>.env` missing: copy it from the `.example` (intended for live until you go live) |
 | `No area given, so '...' would use the old runtime/ folder` | use `./deploy/ab <area> <command>` instead of a bare `bot.cli` command |
 | `screen` refuses: bot is running | run it after the session (about 15:32) or before 09:00 |
+| a config.yaml change has no effect | a Telegram setting overrides it: ⚙️ Settings shows ✏️; tap ↩️ Reset all |
+| 🔄 Restart says "Restart failed" | run `systemctl --user restart angelbot@paper` on the VM |
 | Telegram buttons show old behaviour | `systemctl --user restart angelbot-telegram@paper` after a `git pull` |
 | "No screener snapshot" in Telegram | no screen run yet in that area → `./deploy/ab paper screen` |
 | `AG8001 Invalid Token` loops | session expired (midnight); the bot re-logs in, restart the service if it persists |

@@ -16,6 +16,7 @@ import importlib.util
 import logging
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -29,6 +30,7 @@ from bot import config as C
 from bot import control, notify
 from bot import messages as M
 from bot import screen_report as SR
+from bot import settings as ST
 from bot.journal import query_readonly
 from bot.timeutil import now_ist
 
@@ -44,16 +46,21 @@ HELP = (
     "/kill - close everything and stop (asks to confirm)\n"
     "/screen - stock screener: top picks plus the full ranking as a file (advisory only)\n"
     "/report - send the performance report as a file (optional: all|session|replay and a start date YYYY-MM-DD)\n"
+    "/settings - change selection, shares, risk and exits (this area only)\n"
     "/log - last 20 log lines\n"
     "/menu - show buttons\n"
     "/help - this list"
 )
 
 KILL_TTL_SEC = 60          # a "Yes, stop everything" button works for one minute only
+CONFIRM_TTL_SEC = 60       # same for "Yes, restart" and "Yes, reset"
+RESTART_CMD = ["systemctl", "--user", "--no-block", "restart", "angelbot@paper.service"]
+RESTART_RUNNER = subprocess.run          # replaced in tests
 
 COMMANDS = [("status", "Status and open position"), ("pnl", "Today's trades and result"),
             ("pause", "Stop new trades"), ("resume", "Allow new trades"),
             ("screen", "Stock screener (advisory)"), ("report", "Send the performance report"),
+            ("settings", "Change settings"),
             ("kill", "Emergency stop"), ("log", "Recent log lines"), ("menu", "Show buttons")]
 
 REPORT_SKILL = C.ROOT / "skills" / "angelbot-report" / "build_report.py"
@@ -67,7 +74,7 @@ def main_menu() -> list[list[dict]]:
     return [[_btn("📊 Status", "status"), _btn("💰 Today", "summary")],
             [_btn("⏸ Pause", "pause"), _btn("▶️ Resume", "resume")],
             [_btn("🔎 Screener", "screen"), _btn("📄 Report", "report")],
-            [_btn("🛑 Emergency stop", "kill_ask")]]
+            [_btn("⚙️ Settings", "cfg"), _btn("🛑 Emergency stop", "kill_ask")]]
 
 
 def _refresh_row() -> list[list[dict]]:
@@ -141,7 +148,7 @@ def build_report_file(arg: str, out_dir: Path) -> tuple[Path, str]:
     if not rows:
         raise ValueError(f"No closed trades from {first} on that filter yet.")
     try:
-        timeframe = f"{C.load_config()['strategy'].get('timeframe_min', 1)}-minute"
+        timeframe = f"{ST.load()['strategy'].get('timeframe_min', 1)}-minute"
     except Exception:
         timeframe = "1-minute"
     data = br.build_all(rows, timeframe, today, since, None, control.read_status())
@@ -219,6 +226,126 @@ def kill_do() -> str:
             "then stops (left paused).\nCheck /status and the Angel One app. Use /resume before the next session.")
 
 
+# ───────────────────────────── settings (this area only) ─────────────────────────────
+def _fresh(stamp: str, now: float | None) -> bool:
+    try:
+        return (now or time.time()) - int(stamp) <= CONFIRM_TTL_SEC
+    except ValueError:
+        return False
+
+
+def restart_refusal() -> str | None:
+    """Why the bot cannot be restarted from Telegram right now (None: it can)."""
+    if os.environ.get("ANGELBOT_PROFILE") != "paper":
+        return "Restarting from Telegram is only for the paper area. Restart this one on the VM yourself."
+    s = control.read_status()
+    if not s.get("bot_alive") or s.get("replay"):
+        return "The bot isn't running, so there is nothing to restart: the changes apply at its next start."
+    if s.get("positions") or s.get("pending_orders"):
+        return ("The bot has an open position or a waiting order. A paper position lives only in the bot's memory "
+                "and a restart would lose it, so restart after it closes.")
+    return None
+
+
+def settings_card(note: str = "") -> tuple[str, list[list[dict]]]:
+    area = os.environ.get("ANGELBOT_PROFILE") or "no area"
+    try:
+        cfg = ST.load()
+    except Exception as e:
+        return f"⚙️ <b>Settings</b>\nThe config does not load: {html.escape(str(e))}", [[_btn("☰ Menu", "menu")]]
+    vals = ST.overrides()
+    lines = [f"⚙️ <b>Settings</b> · {html.escape(area)}"]
+    if note:
+        lines += [note, ""]
+    for s in ST.SETTINGS:
+        mark = " ✏️" if s["path"] in vals else ""
+        lines.append(f"{html.escape(s['label'])}: <b>{html.escape(ST.show(s, ST.current(cfg, s)))}</b>{mark}")
+    lines += ["", "✏️ changed here (wins over config.yaml). Tap a setting to change it. "
+                  "Changes apply from the next start and are not backtested."]
+    btns = [_btn(s["btn"], f"cfgk:{s['id']}") for s in ST.SETTINGS]
+    rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
+    if vals:
+        rows.append([_btn("↩️ Reset all to config.yaml", "cfg_reset_ask")])
+    if restart_refusal() is None:
+        rows.append([_btn("🔄 Restart bot now", "rst_ask")])
+    rows.append([_btn("☰ Menu", "menu")])
+    return "\n".join(lines), rows
+
+
+def settings_choices(sid: str) -> tuple[str, list[list[dict]]]:
+    s = ST.BY_ID.get(sid)
+    if s is None:
+        return settings_card("⚠️ Unknown setting.")
+    now = ST.current(ST.load(), s)
+    btns = [_btn(("✓ " if c == now else "") + ST.show(s, c), f"cfgv:{sid}:{i}") for i, c in enumerate(s["choices"])]
+    rows = [btns[i:i + 3] for i in range(0, len(btns), 3)] + [[_btn("« Back", "cfg")]]
+    return f"⚙️ <b>{html.escape(s['label'])}</b>\nNow: <b>{html.escape(ST.show(s, now))}</b>\nPick a value:", rows
+
+
+def settings_set(arg: str) -> tuple[str, list[list[dict]]]:
+    sid, _, idx = arg.partition(":")
+    try:
+        old, new = ST.apply(sid, int(idx) if idx.isdigit() else -1, now=now_ist())
+    except ValueError as e:                          # SettingsError: a bad id or choice, or a result that fails validation
+        return settings_card(f"⚠️ {html.escape(str(e))}")
+    label = ST.BY_ID[sid]["label"]
+    if old == new:
+        return settings_card(f"{html.escape(label)} is already <b>{html.escape(new)}</b>.")
+    return settings_card(f"✅ Saved: {html.escape(label)} {html.escape(old)} → <b>{html.escape(new)}</b>. "
+                         "It applies from the next start.")
+
+
+def restart_ask() -> tuple[str, list[list[dict]]]:
+    why = restart_refusal()
+    if why:
+        return settings_card(f"ℹ️ {why}")
+    s = control.read_status()
+    lines = ["🔄 <b>Restart the paper bot now?</b>",
+             "It stops and starts again within about half a minute, with the new settings.",
+             "Today's picked stocks are kept, so a new selection mode or number of picks fully applies tomorrow. "
+             "Shares, risk limits and exits apply right away."]
+    if s.get("trades_today"):
+        lines.append(f"⚠️ It has made {s['trades_today']} trade(s) today. After a restart the day's trade count and "
+                     "loss limit start again from zero.")
+    return "\n".join(lines), [[_btn("🔄 Yes, restart", f"rst_do:{int(time.time())}")], [_btn("Cancel", "cfg")]]
+
+
+def restart_do(stamp: str, now: float | None = None) -> tuple[str, list[list[dict]]]:
+    if not _fresh(stamp, now):
+        return settings_card("That confirmation expired. Tap Restart again.")
+    why = restart_refusal()                          # check again: things may have changed since the question
+    if why:
+        return settings_card(f"ℹ️ Not restarted: {why}")
+    try:
+        r = RESTART_RUNNER(RESTART_CMD, capture_output=True, text=True, timeout=30)
+        ok, err = r.returncode == 0, (r.stderr or "").strip()
+    except Exception as e:
+        ok, err = False, str(e)
+    if not ok:
+        log.warning("restart failed: %s", err)
+        return (f"⚠️ <b>Restart failed</b>: {html.escape(err[:300])}\nOn the VM run:\n"
+                "<code>systemctl --user restart angelbot@paper</code>", [[_btn("⚙️ Settings", "cfg")]])
+    log.warning("bot restart requested from Telegram")
+    return ("🔄 <b>Restarting the paper bot</b>. Its start message follows shortly; check /status in a minute.",
+            [[_btn("📊 Status", "status"), _btn("☰ Menu", "menu")]])
+
+
+def reset_ask() -> tuple[str, list[list[dict]]]:
+    lines = ST.summary()
+    if not lines:
+        return settings_card("Nothing to reset: every setting comes from config.yaml.")
+    body = "\n".join(f"• {html.escape(l)}" for l in lines)
+    return (f"↩️ <b>Reset these to config.yaml?</b>\n{body}",
+            [[_btn("↩️ Yes, reset", f"cfg_reset_do:{int(time.time())}")], [_btn("Cancel", "cfg")]])
+
+
+def reset_do(stamp: str, now: float | None = None) -> tuple[str, list[list[dict]]]:
+    if not _fresh(stamp, now):
+        return settings_card("That confirmation expired. Tap Reset again.")
+    n = ST.reset(now=now_ist())
+    return settings_card(f"✅ Reset {n} setting(s) to config.yaml. It applies from the next start.")
+
+
 def route(text: str) -> tuple[str, list[list[dict]] | None]:
     """Pure command router (unit-testable). Returns (reply HTML, optional inline buttons)."""
     parts = (text or "").strip().split()
@@ -238,6 +365,8 @@ def route(text: str) -> tuple[str, list[list[dict]] | None]:
         return "📄 Building the report…", None
     if cmd == "/screen":
         return "🔎 Building the screener…", None
+    if cmd == "/settings":
+        return settings_card()
     if cmd == "/pause":
         control.set_control(paused=True, note="telegram pause")
         return "⏸ <b>Paused</b>: no new trades. Open positions keep their safety exit, goal and market-close exit.", main_menu()
@@ -270,6 +399,20 @@ def callback(data: str, now: float | None = None) -> tuple[str, list[list[dict]]
         return HELP, main_menu()
     if action == "sel":
         return apply_choice(arg, now_ist().strftime("%Y-%m-%d")), None
+    if action == "cfg":
+        return settings_card()
+    if action == "cfgk":
+        return settings_choices(arg)
+    if action == "cfgv":
+        return settings_set(arg)
+    if action == "cfg_reset_ask":
+        return reset_ask()
+    if action == "cfg_reset_do":
+        return reset_do(arg, now)
+    if action == "rst_ask":
+        return restart_ask()
+    if action == "rst_do":
+        return restart_do(arg, now)
     if action == "kill_ask":
         return kill_ask()
     if action == "kill_do":

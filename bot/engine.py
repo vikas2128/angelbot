@@ -301,7 +301,9 @@ class Engine:
     def run(self) -> int:
         self.state = "running"
         self.journal.event(self.now(), "start", f"mode={self.broker.mode} replay={self.replay} profile={os.environ.get('ANGELBOT_PROFILE', '')}")
-        notify.send(messages.started(self.broker.mode, self.strategy_name, [i.symbol for i in self.instruments]))
+        from bot import settings
+        notify.send(messages.started(self.broker.mode, self.strategy_name, [i.symbol for i in self.instruments],
+                                     None if self.replay else settings.summary()))
         self.feed.start()
         ended = False
         try:

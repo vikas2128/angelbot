@@ -91,10 +91,13 @@ def _day(day: str) -> str:
 
 
 # ───────────────────────────── alerts from the bot ─────────────────────────────
-def started(mode, strategy, symbols) -> str:
-    return (f"▶️ <b>AngelBot started</b>\n{mode_tag(mode)}\n"
+def started(mode, strategy, symbols, overrides=None) -> str:
+    text = (f"▶️ <b>AngelBot started</b>\n{mode_tag(mode)}\n"
             f"Looking for: {strategy_name(strategy)}\n"
             f"Watching: {esc(', '.join(symbols))}")
+    if overrides:
+        text += "\n⚙️ Changed in Telegram: " + esc("; ".join(overrides))
+    return text
 
 
 def opened(symbol, side, qty, px, stop, target, strategy, mode, ts=None) -> str:
