@@ -7,7 +7,7 @@ from typing import Callable
 
 from bot import messages, notify
 from bot.broker import BrokerError
-from bot.charges import order_charges
+from bot.charges import value_charges
 from bot.instruments import round_to_tick
 from bot.journal import Journal
 from bot.models import Instrument, OrderRecord, Position
@@ -168,7 +168,12 @@ class OrderManager:
         log.info("FILL %s %s %d @ %.2f (pos before %d)", rec.side, rec.symbol, qty, px, pos.qty)
         signed = qty if rec.side == "BUY" else -qty
         cyc = self._cycle.setdefault(rec.symbol, {})
-        fee = order_charges(rec.side, qty, px, self.cfg.get("charges", {}))
+        # brokerage is per executed ORDER: charge each fill the increase in the order's total, so partial fills of
+        # one order pay one brokerage (and one minimum), not one per fill
+        value = rec.extra.get("filled_value", 0.0) + qty * px
+        total = value_charges(rec.side, value, self.cfg.get("charges", {}))
+        fee = round(total - rec.extra.get("charged", 0.0), 2)
+        rec.extra.update(filled_value=value, charged=total)
         cyc["charges"] = cyc.get("charges", 0.0) + fee
         self.charges_today += fee
 

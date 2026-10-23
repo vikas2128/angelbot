@@ -100,14 +100,18 @@ execution:
 paper:
   slippage_pct: 0.02        # applied to simulated fills
 
-charges:                    # approximate — verify against Angel One's current tariff
+charges:                    # Angel One, NSE equity intraday, per executed order (angelone.in/exchange-transaction-charges, checked 2026-10-23)
   brokerage_flat: 20        # ₹ per executed order …
-  brokerage_pct: 0.1        # … or this % of turnover, whichever is lower
-  stt_sell_pct: 0.025       # equity intraday, sell side
-  exchange_txn_pct: 0.00297
-  sebi_per_crore: 10
-  stamp_buy_pct: 0.003
-  gst_pct: 18
+  brokerage_pct: 0.1        # … or this % of the order value, whichever is lower …
+  brokerage_min: 5          # … but at least ₹5 per executed order
+  brokerage_max_pct: 2.5    # never above the exchange maximum brokerage
+  exchange_txn_pct: 0.0030699   # NSE transaction charge, buy and sell (since NSE circular FA73061, Feb 2026)
+  ipft_pct: 0.0000001       # NSE Investor Protection Fund, buy and sell (₹0.01 per crore)
+  sebi_per_crore: 10        # SEBI turnover fee, buy and sell
+  stt_sell_pct: 0.025       # securities transaction tax, sell side only …
+  stt_round_rupee: true     # … rounded to the nearest rupee, as on the contract note
+  stamp_buy_pct: 0.003      # stamp duty, buy side only
+  gst_pct: 18               # on brokerage + exchange txn + SEBI fee + IPFT
 
 feed:
   stale_after_sec: 30       # no ticks for this long in market hours → reconnect

@@ -43,7 +43,7 @@ def fingerprint(cfg: dict) -> str:
     st = cfg["strategy"]
     key = {"strategy": st["name"], "params": (st.get("params") or {}).get(st["name"], {}),
            "timeframe": st.get("timeframe_min", 1), "short": bool(st.get("allow_short")), "exits": cfg.get("exits"),
-           "amount": float((cfg.get("sizing") or {}).get("amount") or 0), "qty": _qty(cfg), "risk": cfg.get("risk"),
+           "amount": float((cfg.get("sizing") or {}).get("amount") or 0), "qty": _qty(cfg), "risk": cfg.get("risk"), "charges": cfg.get("charges"),
            "session": {k: v for k, v in (cfg.get("session") or {}).items() if k != "holidays"}}
     return hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:12]
 

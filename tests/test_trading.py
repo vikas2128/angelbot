@@ -97,7 +97,9 @@ def test_engine_daily_loss_halts_and_flattens(cfg, inst, tmp_path):
     eng.run()
     assert eng.risk.halted_reason and "max_daily_loss" in eng.risk.halted_reason
     assert eng.om.open_positions() == 0
-    assert eng.om.realized_net > -10            # flattened near the limit, not at the bottom (690)
+    # flattened near the limit, not at the bottom (690, about -₹110): the loss is the limit plus about ₹12 of fees
+    # (the ₹5 minimum brokerage on each side of a 1-share trade, plus GST and taxes)
+    assert eng.om.realized_net > -25
 
 
 def test_kill_switch_flattens(cfg, inst, tmp_path):

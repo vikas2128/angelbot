@@ -483,7 +483,11 @@ registration. Confirm specifics with Angel One SmartAPI support; rules and broke
 - Paper fills are optimistic versus real queues and slippage; backtests are bar-based. Expect live to be worse.
 - The bundled strategies are **examples of the plumbing, not proven edges**. Charges dominate at small sizes: at 1 share
   the round trip costs about 0.27% of the trade.
-- `charges` in the config are approximations; check Angel One's current tariff.
+- `charges` in the config follow Angel One's published NSE intraday tariff (checked 23 Oct 2026: brokerage lower of ₹20
+  or 0.1%, minimum ₹5, per executed order; NSE 0.0030699% + IPFT; SEBI ₹10/crore; STT 0.025% on sells, rounded to the
+  rupee; stamp 0.003% on buys; GST 18%). Contract notes round STT per stock per day, the bot per sell order (at most
+  ₹0.50 apart). Re-check the tariff page when Angel One announces a change (they give 30 days' notice). The ₹5
+  minimum makes very small orders expensive: 1 share at ₹800 costs about 1.5% a round trip.
 - Exits use marketable LIMIT orders with chasing; in a fast market an exit can lag. Stuck exits alert after
   `max_exit_chases`.
 - The screener, morning selection and any value changed in ⚙️ Settings have not been backtested. Backtest a new size

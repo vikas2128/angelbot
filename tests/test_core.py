@@ -129,5 +129,5 @@ def test_resolve_and_tick_rounding():
 
 
 def test_charges_positive_and_sell_has_stt():
-    c = {"brokerage_flat": 20, "brokerage_pct": 0.1}
+    c = {"brokerage_flat": 20, "brokerage_pct": 0.1, "brokerage_min": 5}
     assert order_charges("SELL", 10, 800, c) > order_charges("BUY", 10, 800, c) > 0
