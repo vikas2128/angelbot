@@ -147,3 +147,14 @@ svg.chart text.mtext{font-weight:600;font-size:10px}
 tr.tap{cursor:pointer}tr.tap.open td{border-bottom:0}
 td.chartcell{padding:0 0 10px!important}
 svg.i.tiny{width:13px;height:13px;color:var(--muted)}
+
+/* settings */
+.sechead{display:flex;flex-direction:column;gap:1px;margin-bottom:2px}
+.secsub{font-size:12px;color:var(--muted)}
+.setting .lab{display:flex;align-items:center;gap:6px}
+.setting.open{border-bottom:0}
+.badge{font-size:10px;font-weight:600;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);border-radius:999px;padding:1px 6px}
+.panel{padding:0 0 12px;border-bottom:.5px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.panel .help{font-size:12.5px;color:var(--muted);margin:0;line-height:1.45}
+.panel .impact{font-size:12.5px;margin:0;padding:7px 10px;border-radius:8px;background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.banner.info{border-left-color:var(--accent)}

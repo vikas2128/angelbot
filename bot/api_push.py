@@ -47,11 +47,14 @@ def allowed_endpoint(url: str) -> bool:
 
 
 class Pusher:
-    def __init__(self, store, folder: Path | None = None, contact: str = "mailto:owner@angelbot.invalid",
-                 send_fn=None, session=None):
+    def __init__(self, store, folder: Path | None = None, contact: str | None = None, send_fn=None, session=None):
         self.store = store                       # the AuthStore: which devices still exist
         self.dir = folder or store.dir
-        self.contact = contact
+        # VAPID "sub": push services want a real mailto: or https: contact (Apple refuses made-up ones with 403
+        # BadJwtToken). Default: this app's own address; ANGELBOT_PUSH_CONTACT (e.g. mailto:you@gmail.com) overrides.
+        rp = str(getattr(store, "rp_id", "") or "")
+        self.contact = contact or os.environ.get("ANGELBOT_PUSH_CONTACT") or \
+            (f"https://{rp}" if rp.endswith(".ts.net") else "mailto:angelbot@example.com")
         self.send_fn = send_fn                   # tests replace the network call
         self.session = session
         self.lock = threading.Lock()
@@ -131,23 +134,28 @@ class Pusher:
         return any(v.get("device") == device_id for v in self._read().values())
 
     # ---------------------------------------------------------------- sending
-    def _push_one(self, endpoint: str, sub: dict, payload: str) -> int:
+    def _push_one(self, endpoint: str, sub: dict, payload: str) -> tuple[int, str]:
+        """(HTTP status from the push service, its reason when it refused)."""
         from pywebpush import WebPushException, webpush
         info = {"endpoint": endpoint, "keys": sub["keys"]}
         aud = f"{urlparse(endpoint).scheme}://{urlparse(endpoint).netloc}"
+        claims = {"sub": self.contact, "aud": aud, "exp": int(time.time()) + 1800}   # short-lived: Apple is strict
         try:
-            r = webpush(info, data=payload, vapid_private_key=self.vapid(),
-                        vapid_claims={"sub": self.contact, "aud": aud}, ttl=TTL_SEC, timeout=10,
-                        requests_session=self.session)
-            return getattr(r, "status_code", 201)
+            r = webpush(info, data=payload, vapid_private_key=self.vapid(), vapid_claims=claims, ttl=TTL_SEC,
+                        timeout=10, requests_session=self.session)
+            return getattr(r, "status_code", 201), ""
         except WebPushException as e:
-            return getattr(e.response, "status_code", 0) if e.response is not None else 0
+            resp = e.response
+            if resp is None:
+                return 0, str(e)[:200]
+            return getattr(resp, "status_code", 0), (getattr(resp, "text", "") or getattr(resp, "reason", "") or "")[:200]
 
     def send(self, title: str, body: str, only_device: str | None = None) -> dict:
         """Push to every subscription (or one device's). Drops gone and orphaned subscriptions. Never raises."""
         payload = json.dumps({"title": title[:80], "body": body[:MAX_BODY], "ts": int(time.time())}, ensure_ascii=False)
         devices = self.store.devices()
         sent = dropped = failed = 0
+        errors: list[str] = []
         with self.lock:
             subs = self._read()
         for endpoint, sub in list(subs.items()):
@@ -157,11 +165,16 @@ class Pusher:
                 subs.pop(endpoint, None)
                 dropped += 1
                 continue
+            host = urlparse(endpoint).hostname
             try:
-                status = (self.send_fn or self._push_one)(endpoint, sub, payload)
+                got = (self.send_fn or self._push_one)(endpoint, sub, payload)
+                status, why = got if isinstance(got, tuple) else (got, "")
             except Exception as e:                                # a push problem must never stop the watcher
-                log.warning("push failed: %s", e)
-                status = 0
+                status, why = 0, f"{type(e).__name__}: {e}"
+            if not (200 <= status < 300):
+                log.warning("push to %s refused: %s %s", host, status, why)
+                if status not in (404, 410):
+                    errors.append(f"{host} answered {status or 'no response'}" + (f": {why}" if why else ""))
             if status in (404, 410):
                 subs.pop(endpoint, None)
                 dropped += 1
@@ -176,7 +189,10 @@ class Pusher:
                     if k not in subs:
                         current.pop(k)
                 self._write(current)
-        return {"sent": sent, "dropped": dropped, "failed": failed}
+        out = {"sent": sent, "dropped": dropped, "failed": failed}
+        if errors:
+            out["errors"] = errors[:3]
+        return out
 
     # ---------------------------------------------------------------- outbox watcher
     def skip_backlog(self) -> None:

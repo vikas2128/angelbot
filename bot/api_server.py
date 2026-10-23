@@ -210,15 +210,17 @@ def bars_payload(symbol: str | None, date: str | None = None) -> dict:
 
 
 def settings_payload() -> dict:
+    from bot import settings_guide as SG
     cfg = ST.load()
     vals = ST.overrides()
+    guide = SG.payload(cfg, vals, ST.problems(), os.environ.get("ANGELBOT_PROFILE"))
     items = []
     for s in ST.SETTINGS:
         cur = ST.current(cfg, s)
         items.append({"id": s["id"], "label": s["label"], "value": ST.show(s, cur), "changed": s["path"] in vals,
                       "choices": [{"index": i, "label": ST.show(s, c), "current": c == cur} for i, c in enumerate(s["choices"])],
                       "typed": bool(s.get("typed"))})
-    return {"area": os.environ.get("ANGELBOT_PROFILE"), "settings": items, "problems": ST.problems()}
+    return {**guide, "settings": items}                    # "settings": the flat list (kept for older app screens)
 
 
 def _report_html(arg: str) -> tuple[str, str]:

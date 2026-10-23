@@ -81,7 +81,9 @@ def test_push_is_encrypted_and_signed_and_readable_by_the_phone(env):
     auth = post.headers["Authorization"]                                     # VAPID: signed for this push service only
     assert auth.startswith("vapid t=") and f"k={env.pusher.public_key()}" in auth
     claims = json.loads(unb64(auth.split("t=")[1].split(",")[0].split(".")[1]))
-    assert claims["aud"] == "https://fcm.googleapis.com" and claims["sub"].startswith("mailto:")
+    assert claims["aud"] == "https://fcm.googleapis.com" and claims["sub"] == f"https://{RP}"   # a real contact
+    import time
+    assert 0 < claims["exp"] - time.time() <= 1800 + 5                       # short-lived token
 
 
 def test_gone_and_orphaned_subscriptions_are_dropped(env):
@@ -141,3 +143,29 @@ def test_a_device_keeps_only_its_newest_subscriptions_and_files_are_private(env)
     env.pusher.public_key()
     for name in ("push.json", "vapid.pem"):
         assert oct((env.store.dir / name).stat().st_mode & 0o777) == "0o600", name
+
+
+def test_a_refusal_reaches_the_app_with_its_reason(env, monkeypatch):
+    phone = Phone("https://web.push.apple.com/QGabc")
+    env.pusher.subscribe(phone.sub, env.device, "Phone")
+    env.session.status = 403
+    env.session.posts.clear()
+    orig = env.session.post
+
+    def refuse(url, **kw):
+        r = orig(url, **kw)
+        r.text = '{"reason":"BadJwtToken"}'
+        r.reason = "Forbidden"
+        return r
+    monkeypatch.setattr(env.session, "post", refuse)
+    r = env.c.post("/api/push/test", headers=H).json()
+    assert r["sent"] == 0 and r["failed"] == 1 and "web.push.apple.com answered 403" in r["errors"][0]
+    assert "BadJwtToken" in r["errors"][0] and env.pusher.device_has(env.device)     # kept: 403 is not "gone"
+
+
+def test_contact_can_be_set(monkeypatch):
+    from types import SimpleNamespace
+    store = SimpleNamespace(rp_id="localhost", dir=None)
+    assert AP.Pusher(store).contact == "mailto:angelbot@example.com"
+    monkeypatch.setenv("ANGELBOT_PUSH_CONTACT", "mailto:me@gmail.com")
+    assert AP.Pusher(store).contact == "mailto:me@gmail.com"

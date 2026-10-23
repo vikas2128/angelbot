@@ -567,50 +567,74 @@ async function notifyCard() {
     renderSettings();
   } });
   card.append(h('div', { class: 'btns mt8' }, on
-    ? [btn('Send a test', 'primary', async () => { const r = await post('/api/push/test'); toast(r.sent ? 'Test sent' : 'Nothing was sent: try turning notifications off and on'); }),
+    ? [btn('Send a test', 'primary', async () => {
+        const r = await post('/api/push/test');
+        toast(r.sent ? 'Test sent: it should arrive in a few seconds'
+          : r.errors ? `Not sent. ${r.errors[0]}` : 'No subscription for this device: turn notifications off and on again', 6000);
+      }),
        btn('Turn off', '', async () => { await pushOff(); toast('Notifications off for this device'); })]
     : [btn('Turn on notifications', 'primary wide', async () => { await pushOn(); toast('Notifications on'); })]));
   return card;
 }
 
 // ───────────────────────────── settings and devices ─────────────────────────────
+// Settings: grouped, plain words, only what applies now, and what a choice means in rupees (from the server's guide)
 async function renderSettings(openId) {
   const view = $('#view');
   let d, devs, me;
   try { [d, devs, me] = await Promise.all([get('/api/settings'), get('/auth/devices'), get('/auth/me')]); }
   catch (e) { view.replaceChildren(h('div', { class: 'banner', text: e.message })); return; }
-  const card = h('div', { class: 'card' }, h('h2', { text: `Settings · ${d.area}` }));
-  for (const p of d.problems || []) card.append(h('div', { class: 'banner', text: p }));
-  for (const s of d.settings) {
-    const row = h('button', { class: 'setting', 'aria-expanded': openId === s.id ? 'true' : 'false', onclick: () => renderSettings(openId === s.id ? null : s.id) },
-      h('span', { text: s.label + (s.changed ? ' ✏️' : '') }), h('span', { class: 'v' }, s.value, icon('chevron')));
-    card.append(row);
-    if (openId === s.id) {
-      const wrap = h('div', { class: 'choices' }, s.choices.map(c => h('button', { class: 'chip' + (c.current ? ' on' : ''), text: c.label,
-        onclick: async () => { try { const r = await act('/api/settings/set', { id: s.id, choice: c.index }); toast(`Saved: ${r.new}. Applies from the next start.`); renderSettings(); } catch (e) { toast(errText(e, 'Something went wrong')); } } })));
-      card.append(wrap);
+  const save = async body => {
+    try { const r = await act('/api/settings/set', body); toast(`Saved: ${r.new}. ${d.applies}`); renderSettings(openId); }
+    catch (e) { toast(errText(e, 'Not saved')); }
+  };
+  const top = [];
+  for (const p of d.problems || []) top.push(h('div', { class: 'banner', text: p }));
+  if (d.changed) top.push(h('div', { class: 'banner info' }, h('span', {},
+    `${d.changed} setting${d.changed === 1 ? '' : 's'} changed here (marked Changed). ${d.applies}`)));
+  const cards = d.sections.map(sec => {
+    const card = h('div', { class: 'card' }, h('div', { class: 'sechead' }, h('h2', { class: 'm0', text: sec.title }), h('span', { class: 'secsub', text: sec.sub })));
+    const hidden = [];
+    for (const s of sec.items) {
+      if (s.hidden) { hidden.push([s.label, s.note]); continue; }
+      const open = openId === s.id;
+      card.append(h('button', { class: 'setting' + (open ? ' open' : ''), 'aria-expanded': open ? 'true' : 'false',
+        onclick: () => renderSettings(open ? null : s.id) },
+        h('span', { class: 'lab' }, s.label, s.changed ? h('span', { class: 'badge', text: 'Changed' }) : null),
+        h('span', { class: 'v' }, s.value, icon(open ? 'down' : 'chevron'))));
+      if (!open) continue;
+      const panel = h('div', { class: 'panel' }, h('p', { class: 'help', text: s.help }));
+      if (s.impact) panel.append(h('p', { class: 'impact', text: s.impact }));
+      if (s.note) panel.append(h('p', { class: 'hint m0', text: s.note }));
+      panel.append(h('div', { class: 'choices tight' }, s.choices.map(c => h('button', { class: 'chip' + (c.current ? ' on' : ''), text: c.label,
+        onclick: () => save({ id: s.id, choice: c.index }) }))));
       if (s.typed) {
-        const amt = h('input', { class: 'field mt8', type: 'number', inputmode: 'numeric', min: '0', step: '100', placeholder: 'Any amount, e.g. 7500' });
-        const save = h('button', { class: 'btn primary mt8', text: 'Save amount', onclick: async () => {
-          try { const r = await act('/api/settings/set', { id: s.id, amount: amt.value }); toast(`Saved: ${r.new}`); renderSettings(); } catch (e) { toast(errText(e, 'Something went wrong')); } } });
-        card.append(amt, save);
+        const amt = h('input', { class: 'field', type: 'number', inputmode: 'numeric', min: '0', step: '500', placeholder: 'Or type an amount, e.g. 7500' });
+        panel.append(h('div', { class: 'daybar' }, amt, h('button', { class: 'btn primary', text: 'Save', onclick: () => save({ id: s.id, amount: amt.value }) })));
       }
+      card.append(panel);
     }
-  }
-  card.append(h('p', { class: 'hint', text: '✏️ changed here (wins over config.yaml). Applies from the next start; not backtested.' }),
-    h('button', { class: 'btn wide mt8', text: 'Reset all to config.yaml', onclick: async () => {
-      if (!confirm('Reset every changed setting to config.yaml?')) return;
-      try { const r = await act('/api/settings/reset'); toast(`Reset ${r.reset} setting(s)`); renderSettings(); } catch (e) { toast(errText(e, 'Something went wrong')); } } }));
-  const devCard = h('div', { class: 'card' }, h('h2', { text: 'Devices' }),
-    h('div', { class: 'list' }, devs.devices.map(x => h('div', { class: 'item row' },
-      h('span', {}, h('div', { text: x.name + (me.device === x.name ? ' (this device)' : '') }),
+    if (hidden.length) {                          // one line per reason: "A and B are hidden: why"
+      const byNote = {};
+      for (const [label, note] of hidden) (byNote[note] = byNote[note] || []).push(label);
+      for (const [note, labels] of Object.entries(byNote))
+        card.append(h('p', { class: 'hint', text: `${labels.join(' and ')} ${labels.length > 1 ? 'are' : 'is'} hidden. ${note}` }));
+    }
+    return card;
+  });
+  const resetBtn = h('button', { class: 'btn wide', text: 'Reset all to config.yaml', disabled: !d.changed, onclick: async () => {
+    if (!confirm('Reset every setting changed here back to config.yaml?')) return;
+    try { const r = await act('/api/settings/reset'); toast(`Reset ${r.reset} setting(s)`); renderSettings(); } catch (e) { toast(errText(e, 'Not reset')); } } });
+  const devCard = h('div', { class: 'card' }, h('div', { class: 'sechead' }, h('h2', { class: 'm0', text: 'Devices' }), h('span', { class: 'secsub', text: 'Phones and computers that can sign in' })),
+    h('div', { class: 'list' }, devs.devices.map(x => h('div', { class: 'item devrow' },
+      h('span', {}, h('div', { text: x.name + (me.device === x.name ? ' · this device' : '') }),
         h('div', { class: 't', text: `added ${String(x.created).slice(0, 10)} · last used ${x.last_used ? String(x.last_used).slice(0, 16).replace('T', ' ') : 'never'}` })),
       h('button', { class: 'chip', text: 'Remove', onclick: async () => {
         if (!confirm(`Remove ${x.name}? It is signed out at once.`)) return;
-        try { await act('/auth/devices/remove', { id: x.id }); toast(`Removed ${x.name}`); renderSettings(); } catch (e) { toast(errText(e, 'Something went wrong')); } } })))),
-    h('p', { class: 'muted small', text: 'Add a device: on the VM run ./deploy/ab paper app enroll --name "..." and register it from that device.' }),
+        try { await act('/auth/devices/remove', { id: x.id }); toast(`Removed ${x.name}`); renderSettings(); } catch (e) { toast(errText(e, 'Not removed')); } } })))),
+    h('p', { class: 'hint', text: 'Add one: on the VM run ./deploy/ab paper app enroll --name "..." and register from that device.' }),
     h('button', { class: 'btn wide mt8', onclick: async () => { try { await post('/auth/logout'); } catch (_) {} showSignIn(); } }, icon('logout'), 'Sign out'));
-  view.replaceChildren(await notifyCard(), card, devCard);
+  view.replaceChildren(...top, await notifyCard(), ...cards, resetBtn, devCard);
 }
 
 // ───────────────────────────── tabs and start ─────────────────────────────
