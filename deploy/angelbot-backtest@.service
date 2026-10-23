@@ -1,0 +1,16 @@
+# systemd USER template unit: backtest every screened stock after the close, for the screener's backtest check.
+# The instance name is the area (paper | live). Read-only market data; it never places orders.
+#   systemctl --user start angelbot-backtest@paper      (run it now, by hand)
+[Unit]
+Description=AngelBot nightly per-stock backtests (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/angelbot
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Kolkata
+EnvironmentFile=%h/angelbot/profiles/%i.env
+ExecStart=%h/angelbot/.venv/bin/python -m bot.cli backtest-stocks
+TimeoutStartSec=30min

@@ -157,6 +157,7 @@ The services are systemd **user** units, one instance per area (`@paper`, `@live
 | `angelbot@paper.timer` | starts the trading bot at **09:05 IST, Mon–Fri** |
 | `angelbot@paper.service` | the trading bot: one session per start; skips holidays, flattens at 15:12, exits about 15:32 |
 | `angelbot-telegram@paper.service` | Telegram commands and buttons; always on, independent of trading |
+| `angelbot-backtest@paper.timer` | backtests every screened stock at **15:45 IST, Mon–Fri**, for the backtest check (§5) |
 
 ### Paper
 
@@ -200,6 +201,9 @@ cd ~/angelbot && git pull
 systemctl --user restart angelbot-telegram@paper   # always: it is long-running and keeps the old code otherwise
 systemctl --user daemon-reload                     # only if files in deploy/*.service or *.timer changed, after copying
                                                    # them again: cp deploy/angelbot*@.* ~/.config/systemd/user/
+# first time after this update only: install and switch on the nightly per-stock backtests
+cp deploy/angelbot-backtest@.* ~/.config/systemd/user/ && systemctl --user daemon-reload
+systemctl --user enable --now angelbot-backtest@paper.timer
 ```
 
 The trading bot loads new code at its next start (tomorrow's 09:05 timer). To use it today, outside a position,
@@ -247,6 +251,7 @@ Tap a setting, then a value. Only fixed choices are offered, no typed values:
 | Selection mode / picks to trade | off · auto · confirm / 1 · 2 · 3 |
 | Shares for a picked stock / for my list | 1 · 2 · 5 · 10 · 20 · 50 |
 | Stocks to screen | built-in 20 · Nifty 50 · Bank Nifty · Nifty 50 + Bank Nifty |
+| Backtest check | off · on (skip stocks whose recent backtest lost, §5) |
 | Strategy | ema_cross · orb · vwap_revert |
 | Max daily loss / max trades per day | ₹250 to ₹5,000 / 3 · 5 · 10 · 20 |
 | Stop loss / target | 0.2–1.0% / 0.3–2.0% |
@@ -305,6 +310,30 @@ Then tap 🔎 Screener (or send `/screen`) in the Paper bot.
 It reads the same market data and writes to `runtime/live/screen.json`, shown by the Live bot. It never trades, but
 the same rule applies: not while the live bot is running. Both areas use the same broker account, so don't screen in
 one area while the other area's bot is running either.
+
+### Backtest check (only stocks whose recent backtest made money)
+
+With `screener.backtest_gate: true` (on in the shipped config; ⚙️ Settings → Backtest check):
+
+1. **Every weekday at 15:45** `angelbot-backtest@paper.timer` backtests each stock the screener looks at, with the
+   current strategy, exits, risk limits and order size (amount per trade or shares), over the last 30 days of 1-minute
+   candles. Results: `runtime/paper/stock_backtests.json`. About 3 seconds a stock (Nifty 50 + Bank Nifty: about 3 minutes).
+2. **Next morning** the screener leaves out a stock whose backtest lost money after fees, or made fewer than
+   `bt_min_trades` (20) trades, with the reason. The page and the Telegram summary show each pick's backtest result.
+3. **No usable backtest** (none yet, older than 4 days, or the strategy, exits, risk limits or order size changed
+   since): every stock is left out and the page says why, so morning selection falls back to the instruments in your
+   config (`selection.on_failure`). Re-run it by hand after changing those settings.
+
+```bash
+./deploy/ab paper backtest-stocks                          # by hand, after the close (refuses while the bot runs)
+./deploy/ab paper backtest-stocks --universe nifty50 --days 30
+systemctl --user start angelbot-backtest@paper             # the same through systemd
+journalctl --user -u angelbot-backtest@paper -n 80 --no-pager
+```
+
+Be honest about what it shows: 30 days is a few dozen trades per stock, and picking the stocks that did well last
+month is choosing on past data. It filters out stocks that clearly lose with this strategy; it does not prove a pick
+will make money. Judge it by comparing paper results with and without the check over several weeks.
 
 ### Nifty 50 and Bank Nifty lists
 
@@ -466,6 +495,7 @@ registration. Confirm specifics with Angel One SmartAPI support; rules and broke
 | `screen` refuses: bot is running | run it after the session (about 15:32) or before 09:00 |
 | a config.yaml change has no effect | a Telegram setting overrides it: ⚙️ Settings shows ✏️; tap ↩️ Reset all |
 | 🔄 Restart says "Restart failed" | run `systemctl --user restart angelbot@paper` on the VM |
+| every stock "left out: backtest check: ..." | no fresh per-stock backtest: `./deploy/ab paper backtest-stocks` after the close |
 | Telegram buttons show old behaviour | `systemctl --user restart angelbot-telegram@paper` after a `git pull` |
 | "No screener snapshot" in Telegram | no screen run yet in that area → `./deploy/ab paper screen` |
 | `AG8001 Invalid Token` loops | session expired (midnight); the bot re-logs in, restart the service if it persists |

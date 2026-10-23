@@ -24,6 +24,9 @@ DEFAULTS = {
     "order_value": 40000,          # planned ₹ per order: fees as a share of the order depend on this
     "qty": 0,                      # fixed shares per order (the bot's real size); 0 = size by order_value
     "max_order_value": 0,          # gate: one order (qty x price) above this ₹ is refused by the bot; 0 = no gate
+    "backtest_gate": False,        # gate: leave out a stock whose recent backtest (stock_backtest.py) lost money or traded too little
+    "bt_min_trades": 20,           # ... fewer backtest trades than this is too few to judge
+    "bt_min_net": 0.0,             # ... net P&L after fees must be above this (₹)
     "amount": 0,                   # sizing.amount: ₹ per trade; > 0 sizes by it and leaves out a stock whose one share costs more
     "min_traded_value_cr": 100.0,  # gate: average daily traded value, ₹ crore
     "max_spread_pct": 0.10,        # gate: best bid-ask spread, % of price (only if the quote has depth)
@@ -104,6 +107,7 @@ def metrics(raw: dict, p: dict, charges_cfg: dict) -> dict:
     m["spread_pct"] = round((ask - bid) / ((ask + bid) / 2) * 100, 3) if bid > 0 and ask >= bid > 0 else None
     vol = raw.get("volume")
     m["vol_pct_of_avg"] = round(float(vol) / avg_vol * 100, 1) if vol is not None and avg_vol > 0 else None
+    m["bt"] = raw.get("bt")                       # this stock's recent backtest summary, if the backtest check is on
     if ltp > 0:
         qty = int(p.get("qty") or 0) or max(1, int(float(p["order_value"]) // ltp))
         cost = order_charges("BUY", qty, ltp, charges_cfg) + order_charges("SELL", qty, ltp, charges_cfg)
@@ -124,6 +128,19 @@ def gates(m: dict, p: dict) -> list[str]:
         return out
     if m["ltp"] is None:
         out.append("no price")
+    if p.get("backtest_gate"):
+        bt, why = m.get("bt"), p.get("bt_unavailable")
+        if why:
+            out.append(f"backtest check: {why}")
+        elif not bt:
+            out.append("no recent backtest for this stock")
+        elif int(bt.get("trades") or 0) < int(p["bt_min_trades"]):
+            out.append(f"backtest made only {int(bt.get('trades') or 0)} trades in {bt.get('days')} days "
+                       f"(need {p['bt_min_trades']})")
+        elif float(bt.get("net_pnl") or 0) <= float(p["bt_min_net"]):
+            out.append(f"backtest lost ₹{-float(bt['net_pnl']):,.2f} after fees over {bt.get('days')} days "
+                       f"({bt['trades']} trades)" if float(bt["net_pnl"]) < 0 else
+                       f"backtest made ₹{float(bt['net_pnl']):,.2f} after fees, not above ₹{float(p['bt_min_net']):,.0f}")
     amt = float(p.get("amount") or 0)
     if amt > 0 and m["ltp"] and m["ltp"] > amt:
         out.append(f"one share costs ₹{m['ltp']:,.0f}, more than your ₹{amt:,.0f} per trade")

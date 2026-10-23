@@ -59,6 +59,13 @@ def _num(v, suffix="") -> str:
     return DASH if v is None else f"{v:g}{suffix}"
 
 
+def _money(v) -> str:
+    if v is None:
+        return DASH
+    v = float(v)
+    return f"{'+' if v > 0 else '−' if v < 0 else ''}₹{abs(v):,.2f}"
+
+
 def _name(sym: str) -> str:
     """SBIN-EQ -> SBIN on the page: every screened instrument is a cash share, and the suffix only costs width on a phone."""
     return sym[:-3] if sym.endswith("-EQ") else sym
@@ -121,7 +128,9 @@ def how_it_works(p: dict) -> list[str]:
         f"the size of today's gap ({share('gap')}), how much of a normal day's volume has traded so far ({share('volume')}) "
         f"and liquidity ({share('liquidity')}). A factor with no data is left out for that stock, not guessed.",
         "Volume traded so far is only comparable between stocks at the same moment, and means more later in the morning.",
-    ]
+    ] + ([f"Backtest check: each stock was backtested the evening before with today's strategy and order size; a stock "
+          f"whose backtest lost money after fees, or made fewer than {p['bt_min_trades']} trades, is left out. "
+          "A few weeks of history is a coarse filter, not proof the stock will make money."] if p.get("backtest_gate") else [])
 
 
 def render_html(snap: dict) -> str:
@@ -136,6 +145,13 @@ def render_html(snap: dict) -> str:
             return f'<span>{r["suggested_qty"]} shares<b>{esc(DASH if v is None else f"₹{v:,.0f}")}</b></span>'
         return f'<span>Qty for ₹{float(p["order_value"]):,.0f}<b>{esc(_num(r["suggested_qty"]))}</b></span>'
 
+    def bt_chip(r):
+        bt = r.get("bt")
+        if not bt:
+            return ""
+        return (f'<span>Backtest {esc(str(bt.get("days")))}d<b>{esc(_money(bt.get("net_pnl")))} · '
+                f'{esc(str(bt.get("trades")))} trades</b></span>')
+
     cards = "".join(
         f'<div class="card pick"><div class="rk">#{r["rank"]}</div><div class="sym">{esc(_name(r["symbol"]))}{_tags(r)}</div>'
         f'<div class="sc"><b>{r["score"]:.0f}</b> / 100</div><div class="bar"><div style="width:{r["score"]:.0f}%"></div></div>'
@@ -143,7 +159,7 @@ def render_html(snap: dict) -> str:
         f'<div class="chips"><span>Price<b>{esc(_num(r["ltp"], ""))}</b></span><span>Gap<b>{esc(_gap(r["gap_pct"]))}</b></span>'
         f'<span>Room vs fees<b>{esc(_num(r["range_to_cost"], "x"))}</b></span><span>Spread<b>{esc(_pct(r["spread_pct"], 2))}</b></span>'
         f'{size_chip(r)}'
-        f'<span>Traded/day<b>{esc(_num(r["traded_value_cr"], " cr"))}</b></span></div></div>' for r in picks)
+        f'<span>Traded/day<b>{esc(_num(r["traded_value_cr"], " cr"))}</b></span>{bt_chip(r)}</div></div>' for r in picks)
     if not picks:
         cards = '<div class="card"><h2>No stock passed the gates today</h2><p class="note">See the excluded list below for why.</p></div>'
 
@@ -211,6 +227,8 @@ def summary_html(snap: dict, today: str | None = None) -> str:
         lines.append("No stock passed the gates.")
     for r in ok[:n]:
         bits = [f"score {r['score']:.0f}", f"gap {_gap(r['gap_pct'])}", f"room {_num(r['range_to_cost'], 'x')} fees"]
+        if r.get("bt"):
+            bits.append(f"backtest {_money(r['bt'].get('net_pnl'))} in {r['bt'].get('trades')} trades")
         tags = "".join(f" [{esc(t)}]" for t in r.get("indices") or [])
         lines.append(f"{r['rank']}. <b>{esc(r['symbol'])}</b>{tags} · " + " · ".join(bits))
     lines.append(f"Checked {snap['universe']} stocks, {snap['eligible']} passed the gates.")

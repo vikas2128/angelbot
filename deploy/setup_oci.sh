@@ -50,7 +50,8 @@ echo "==> Unit tests"
 echo "==> systemd user service + weekday timer (runs without you being logged in)"
 sudo loginctl enable-linger "$USER"
 mkdir -p ~/.config/systemd/user
-cp deploy/angelbot@.service deploy/angelbot@.timer deploy/angelbot-telegram@.service ~/.config/systemd/user/
+cp deploy/angelbot@.service deploy/angelbot@.timer deploy/angelbot-telegram@.service \
+   deploy/angelbot-backtest@.service deploy/angelbot-backtest@.timer ~/.config/systemd/user/
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 systemctl --user daemon-reload
 # Only the PAPER area is switched on. Live is installed as a template but is never enabled or started here:
@@ -58,6 +59,7 @@ systemctl --user daemon-reload
 systemctl --user enable angelbot@paper.timer
 systemctl --user start angelbot@paper.timer
 systemctl --user enable angelbot-telegram@paper.service
+systemctl --user enable --now angelbot-backtest@paper.timer      # per-stock backtests at 15:45 for the backtest check
 systemctl --user restart angelbot-telegram@paper.service || true   # exits quietly until the paper bot token is set
 systemctl --user list-timers 'angelbot@*' --no-pager || true
 

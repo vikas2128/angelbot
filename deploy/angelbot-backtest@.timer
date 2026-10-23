@@ -1,0 +1,12 @@
+# Runs the per-stock backtests for one area every weekday at 15:45 IST, after the bot has exited (about 15:32).
+#   systemctl --user enable --now angelbot-backtest@paper.timer
+[Unit]
+Description=AngelBot nightly per-stock backtests (%i) on weekday evenings
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 15:45:00 Asia/Kolkata
+Persistent=false
+Unit=angelbot-backtest@%i.service
+
+[Install]
+WantedBy=timers.target

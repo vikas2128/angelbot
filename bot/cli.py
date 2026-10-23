@@ -7,6 +7,7 @@
   python -m bot.cli backtest SBIN-EQ --from 2026-08-01 --to 2026-10-15 [--strategy orb --params '{"range_minutes":30}']
   python -m bot.cli instruments RELIANCE [--exchange NSE]
   python -m bot.cli screen [--top 3] [--universe nifty50,banknifty | SBIN-EQ,TCS-EQ] [--html out.html]   # rank stocks (advisory, read-only)
+  python -m bot.cli backtest-stocks [--days 30]  # nightly: backtest each screened stock for the screener's backtest check
   python -m bot.cli universe show | refresh [--name nifty50|banknifty]   # the Nifty 50 / Bank Nifty stock lists (NSE CSVs)
   python -m bot.cli status | pause | resume | kill | unkill
   python -m bot.cli sample-data SBIN-EQ       # synthetic candles for offline testing ONLY
@@ -272,6 +273,51 @@ def cmd_screen(args, cfg):
     print("(advisory only: the bot still trades just the instruments in config.yaml)")
 
 
+def cmd_backtest_stocks(args, cfg):
+    """Backtest every stock the screener looks at, for tomorrow's backtest check (read-only market data)."""
+    from bot import screener, stock_backtest as SB
+    from bot import universe as U
+    from bot.instruments import load_master, resolve
+
+    _no_area_guard("backtest-stocks")
+    st = control.read_status()
+    if st.get("bot_alive") and not st.get("replay") and not args.force:
+        sys.exit("The bot is running right now. A second broker login during a session may disturb it. "
+                 "Run this after the session ends, or pass --force if you accept that risk.")
+    entries = [x.strip() for x in args.universe.split(",") if x.strip()] if args.universe else \
+        list((cfg.get("screener") or {}).get("universe") or screener.DEFAULT_UNIVERSE)
+    symbols, notes = U.expand(entries)
+    master = load_master()
+    insts = []
+    for sym in symbols:
+        try:
+            insts.append(resolve([{"symbol": sym, "exchange": "NSE", "qty": 1}], master)[0])
+        except ValueError:
+            notes.append(f"{sym}: not found in the instrument master")
+    if not insts:
+        sys.exit("no stocks to backtest: " + "; ".join(notes))
+    print(f"backtesting {len(insts)} stocks over {args.days} days ({cfg['strategy']['name']}); "
+          f"about {len(insts) * 3} seconds at the broker's pace...")
+    broker = _live_broker(cfg)
+    try:
+        snap = SB.run_all(cfg, broker, insts, now_ist(), args.days,
+                          progress=lambda i, n, sym: print(f"  [{i}/{n}] {sym}", flush=True))
+    except KeyboardInterrupt:
+        sys.exit("interrupted")
+    finally:
+        broker.logout()
+    snap["errors"] = notes + snap["errors"]
+    SB.save(snap)
+    rows = sorted(snap["results"].items(), key=lambda kv: -(kv[1]["net_pnl"] or 0))
+    for sym, r in rows:
+        print(f"  {sym:<14} net {r['net_pnl']:>9.2f}  trades {r['trades']:>4}  win {r['win_rate_pct']:>5}%  "
+              f"PF {r['profit_factor']}  maxDD {r['max_drawdown']}")
+    for e in snap["errors"]:
+        print("  problem:", e)
+    print(f"saved {len(rows)} results -> {SB.path()}  (used by the screener's backtest check)")
+    return 1 if not rows else 0
+
+
 def cmd_universe(args, cfg):
     """Show or refresh the Nifty 50 / Bank Nifty stock lists the screener can use. Stocks only; needs no broker login."""
     from bot import universe as U
@@ -401,6 +447,11 @@ def main(argv=None):
     sc.add_argument("--html", help="also write the standalone HTML report here")
     sc.add_argument("--force", action="store_true", help="run even while the bot is running (second login!)")
 
+    bs = sub.add_parser("backtest-stocks")
+    bs.add_argument("--universe", help="comma-separated presets or symbols (default: the screener's universe)")
+    bs.add_argument("--days", type=int, default=30, help="days of 1-minute candles (default 30)")
+    bs.add_argument("--force", action="store_true", help="run even while the bot is running (second login!)")
+
     s = sub.add_parser("sample-data")
     s.add_argument("symbol"); s.add_argument("--days", type=int, default=20)
     s.add_argument("--start-price", type=float, default=800.0); s.add_argument("--seed", type=int, default=7)
@@ -418,6 +469,7 @@ def main(argv=None):
     cfg = settings.load(Path(args.config) if args.config else None)     # config.yaml + this area's Telegram settings
     handlers = {"check": cmd_check, "run": cmd_run, "fetch": cmd_fetch, "backtest": cmd_backtest,
                 "instruments": cmd_instruments, "sample-data": cmd_sample, "screen": cmd_screen, "universe": cmd_universe,
+                "backtest-stocks": cmd_backtest_stocks,
                 "telegram-test": cmd_telegram_test}
     rc = handlers.get(args.cmd, cmd_control)(args, cfg)
     sys.exit(rc or 0)

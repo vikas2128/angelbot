@@ -33,6 +33,8 @@ SETTINGS = [
     {"id": "listqty", "btn": "List shares", "label": "Shares for my list", "path": "instruments.qty", "choices": [1, 2, 5, 10, 20, 50]},
     {"id": "univ", "btn": "Universe", "label": "Stocks to screen", "path": "screener.universe",
      "choices": [_BUILTIN, ["nifty50"], ["banknifty"], ["nifty50", "banknifty"]]},
+    {"id": "btgate", "btn": "Backtest check", "label": "Backtest check", "path": "screener.backtest_gate",
+     "choices": [False, True]},
     {"id": "strat", "btn": "Strategy", "label": "Strategy", "path": "strategy.name", "choices": ["ema_cross", "orb", "vwap_revert"]},
     {"id": "maxloss", "btn": "Max loss", "label": "Max daily loss", "path": "risk.max_daily_loss", "choices": [250, 500, 1000, 2000, 5000]},
     {"id": "maxtr", "btn": "Max trades", "label": "Max trades per day", "path": "risk.max_trades_per_day", "choices": [3, 5, 10, 20]},
@@ -145,6 +147,8 @@ def current(cfg_merged: dict, s: dict):
         return list(v)
     if s["path"] == "sizing.amount":
         return float(v or 0)
+    if s["path"] == "screener.backtest_gate":
+        return bool(v)
     return v
 
 
@@ -157,6 +161,8 @@ def show(s: dict, v) -> str:
         if v == _BUILTIN:
             return "built-in 20 stocks"
         return " + ".join(_UNIVERSE_WORDS.get(x, str(x)) for x in v)
+    if p == "screener.backtest_gate":
+        return "on (skip stocks whose recent backtest lost)" if v else "off"
     if p == "sizing.amount":
         return f"₹{float(v):,.0f} (shares worked out per trade)" if float(v) else "off (use the share counts)"
     if p == "risk.max_daily_loss":
