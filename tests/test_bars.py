@@ -50,3 +50,47 @@ def test_bars_route_checks_session_symbol_and_day(tmp_path, monkeypatch):
         control.write_json(control.BARS, {"date": "2020-01-01", "bars": {"TCS-EQ": [[1, 2, 3, 4, 5, 6]]}})
         assert c.get("/api/bars?symbol=TCS-EQ").status_code == 404                        # yesterday's file
     control.BARS.unlink()
+
+
+def test_engine_keeps_a_file_per_day_and_only_the_last_14(cfg, inst, tmp_path, monkeypatch):
+    from bot import notify
+    from test_trading import _FakeFeed
+    monkeypatch.setattr(notify, "send", lambda t, b=None: None)
+    control.BARS_DIR.mkdir(parents=True, exist_ok=True)
+    for f in control.BARS_DIR.glob("*.json"):
+        f.unlink()
+    for d in range(1, 21):                                                   # 20 older days already kept
+        (control.BARS_DIR / f"2026-09-{d:02d}.json").write_text("{}")
+    eng = Engine(cfg, PaperBroker(0.0), _FakeFeed(), [inst], Journal(tmp_path / "j.db"), queue.Queue())
+    today = now_ist().strftime("%Y-%m-%d")
+    eng.now = lambda: datetime.fromisoformat(f"{today} 10:00").replace(tzinfo=IST)
+    eng.prefill({"SBIN-EQ": make_bars([800.0, 801.0], start=f"{today} 09:15")})
+    kept = sorted(f.stem for f in control.BARS_DIR.glob("????-??-??.json"))
+    assert len(kept) == control.BARS_KEEP_DAYS and kept[-1] == today and kept[0] == "2026-09-08"
+    assert len(control.read_json(control.BARS_DIR / f"{today}.json")["bars"]["SBIN-EQ"]) == 2
+    for f in control.BARS_DIR.glob("*.json"):
+        f.unlink()
+
+
+def test_bars_for_a_past_day_from_the_bot_then_the_nightly_candles(tmp_path, monkeypatch):
+    from datetime import timedelta
+    from bot import data as D
+    monkeypatch.setenv("ANGELBOT_PROFILE", "paper")
+    today = now_ist().date()
+    d1, d2 = (today - timedelta(days=1)).isoformat(), (today - timedelta(days=2)).isoformat()
+    control.write_json(control.BARS_DIR / f"{d1}.json", {"date": d1, "timeframe_min": 1,
+                       "bars": {"TCS-EQ": [[f"{d1}T09:15:00+05:30", 1, 2, 0.5, 1.5, 10]]}})
+    D.save_csv([[f"{d2}T09:15:00+05:30", 3, 4, 2.5, 3.5, 20], [f"{d1}T09:15:00+05:30", 9, 9, 9, 9, 9]], D.csv_path("TCS-EQ"))
+    store, c = _client(tmp_path)
+    with c:
+        _signed_in(store, c)
+        r = c.get(f"/api/bars?symbol=TCS-EQ&date={d1}").json()
+        assert r["source"] == "bot" and r["bars"][0][1] == 1                  # the bot's own bars win
+        r = c.get(f"/api/bars?symbol=TCS-EQ&date={d2}").json()
+        assert r["source"] == "candles" and r["bars"] == [[f"{d2}T09:15:00+05:30", 3.0, 4.0, 2.5, 3.5, 20.0]]
+        assert c.get(f"/api/bars?symbol=INFY-EQ&date={d1}").status_code == 404
+        future = (today + timedelta(days=1)).isoformat()
+        for bad in (future, (today - timedelta(days=40)).isoformat(), "2026-13-40", "yesterday"):
+            assert c.get(f"/api/bars?symbol=TCS-EQ&date={bad}").status_code == 400, bad
+    (control.BARS_DIR / f"{d1}.json").unlink()
+    D.csv_path("TCS-EQ").unlink()

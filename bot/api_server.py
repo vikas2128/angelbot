@@ -175,17 +175,38 @@ def _totals(rows: list[dict]) -> dict:
 _SYMBOL = re.compile(r"^[A-Z0-9&-]{1,30}$")
 
 
-def bars_payload(symbol: str | None) -> dict:
-    """Today's 1-minute bars the bot built for one stock it trades today (from runtime/<area>/bars.json)."""
+HISTORY_DAYS = 31        # charts go back this far (the bot keeps 14 trading days; the nightly candle files about 30)
+
+
+def bars_payload(symbol: str | None, date: str | None = None) -> dict:
+    """One day's 1-minute bars for one stock: the bot's own (runtime/<area>/bars.json today, bars/<date>.json for
+    earlier days), else the nightly job's candle file (data/candles). Read-only; never asks the broker."""
     symbol = str(symbol or "")
     if not _SYMBOL.match(symbol):
         raise BadRequest("symbol must look like SBIN-EQ")
-    data = control.read_json(control.BARS)
     today = now_ist().strftime("%Y-%m-%d")
-    if data.get("date") != today or symbol not in (data.get("bars") or {}):
-        raise ValueError(f"no bars for {symbol} today")
-    return {"symbol": symbol, "date": today, "timeframe_min": data.get("timeframe_min", 1),
-            "bars": data["bars"][symbol][-400:]}
+    day = date or today
+    if not _DATE.match(day):
+        raise BadRequest("date must be YYYY-MM-DD")
+    try:
+        age = (datetime.fromisoformat(today) - datetime.fromisoformat(day)).days
+    except ValueError:
+        raise BadRequest("date must be a real day") from None
+    if age < 0 or age > HISTORY_DAYS:
+        raise BadRequest(f"date must be within the last {HISTORY_DAYS} days")
+    for f in ((control.BARS,) if day == today else ()) + (control.BARS_DIR / f"{day}.json",):
+        data = control.read_json(f)
+        rows = (data.get("bars") or {}).get(symbol) if data.get("date") == day else None
+        if rows:
+            return {"symbol": symbol, "date": day, "timeframe_min": data.get("timeframe_min", 1), "source": "bot",
+                    "bars": rows[-400:]}
+    from bot import data as D
+    path = D.csv_path(symbol)                               # the nightly per-stock backtests keep these
+    if path.exists():
+        rows = [r for r in D.load_csv(path) if str(r[0])[:10] == day]
+        if rows:
+            return {"symbol": symbol, "date": day, "timeframe_min": 1, "source": "candles", "bars": rows[-400:]}
+    raise ValueError(f"no bars for {symbol} on {day}")
 
 
 def settings_payload() -> dict:
@@ -331,7 +352,7 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
         return JSONResponse(settings_payload())
 
     def bars(r):
-        return JSONResponse(bars_payload(r.query_params.get("symbol")))
+        return JSONResponse(bars_payload(r.query_params.get("symbol"), r.query_params.get("date")))
 
     def alerts_(r):
         limit = r.query_params.get("limit", "50")

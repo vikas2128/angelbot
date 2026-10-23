@@ -138,3 +138,12 @@ svg.chart .hit{fill:transparent;cursor:crosshair}
 .legend .k::before{content:"";display:inline-block;width:14px;height:0;border-top:2px solid;margin-right:5px;vertical-align:middle}
 .legend .ln-entry::before{border-top:2px dotted var(--fg)}.legend .ln-stop::before{border-top:2px dashed var(--bad)}
 .legend .ln-tgt::before{border-top:2px dashed var(--ok)}.legend .ema-f::before{border-color:var(--accent)}.legend .ema-s::before{border-color:var(--warn)}
+svg.chart .shade{fill:var(--accent);opacity:.08}
+svg.chart .mark{stroke-width:0}
+svg.chart .m-buy{fill:var(--accent)}svg.chart .m-sell{fill:var(--warn)}
+svg.chart text.mtext{font-weight:600;font-size:10px}
+.legend .m-buy::before{border-top:0;content:"▲";color:var(--accent);width:auto;margin-right:3px}
+.legend .m-sell::before{border-top:0;content:"▼";color:var(--warn);width:auto;margin-right:3px}
+tr.tap{cursor:pointer}tr.tap.open td{border-bottom:0}
+td.chartcell{padding:0 0 10px!important}
+svg.i.tiny{width:13px;height:13px;color:var(--muted)}

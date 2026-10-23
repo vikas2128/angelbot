@@ -320,28 +320,17 @@ function liveBars(bars, ltp, nowIso) {            // add the forming candle from
   if (m && m > String(last.t).slice(0, 16)) out.push({ t: m + ':00', o: last.c, h: Math.max(last.c, ltp), l: Math.min(last.c, ltp), c: ltp, live: true });
   return out;
 }
-function drawChart(p, s) {
-  const sym = p.symbol, all = liveBars(chart.bars[sym] || [], p.ltp, s.now);
-  const box = h('div', { class: 'chartbox' });
-  const chips = h('div', { class: 'choices tight' }, RANGES.map(([name]) => h('button', { class: 'chip' + (chart.range === name ? ' on' : ''), text: name,
-    onclick: ev => { ev.stopPropagation(); chart.range = name; chart.pick = {}; renderHome(); } })));
-  if (!all.length) { box.append(chips, h('p', { class: 'muted small m0', text: chart.loading.has(sym) ? 'Loading candles…' : 'No candles yet today.' })); return box; }
-  const n = RANGES.find(r => r[0] === chart.range)[1], start = Math.max(0, all.length - n), bars = all.slice(start);
-  const st = (s.strategy_state || {})[sym] || {}, sp = strategyParams((s.strategies || {})[sym] || s.strategy);
-  const closesAll = all.map(b => b.c);
-  const series = [];
-  if (sp.name === 'ema_cross' && sp.fast && sp.slow) {
-    series.push(['ema-f', emaSeries(closesAll, sp.fast).slice(start), `${sp.fast}-min avg`], ['ema-s', emaSeries(closesAll, sp.slow).slice(start), `${sp.slow}-min avg`]);
-  }
-  const levels = [['ln-entry', p.avg, 'Entry'], ['ln-stop', p.stop, 'Stop'], ['ln-tgt', p.target, 'Target']];
-  if ('range_high' in st) levels.push(['ln-lvl', st.range_high, 'Range high'], ['ln-lvl', st.range_low, 'Range low']);
-  if ('vwap' in st) levels.push(['ln-lvl', st.vwap, 'VWAP'], ['ln-lvl', st.buy_below, 'Buy below'], ['ln-lvl', st.sell_above, 'Sell above']);
-  const vals = bars.flatMap(b => [b.h, b.l]).concat(levels.map(l => l[1]).filter(v => v != null), series.flatMap(x => x[1]).filter(v => v != null));
+// Draws candles with optional level lines, average lines, buy/sell markers and a shaded span. Shared by the position
+// card (live, today) and the trade list (a past day). `pickKey` remembers the tapped candle; `rerender` redraws.
+function candleSvg(bars, { levels = [], series = [], markers = [], shade = null, pickKey, rerender }) {
+  const vals = bars.flatMap(b => [b.h, b.l]).concat(levels.map(l => l[1]).filter(v => v != null),
+    series.flatMap(x => x[1]).filter(v => v != null));
   let lo = Math.min(...vals), hi = Math.max(...vals);
-  const pad = (hi - lo || hi * 0.002) * 0.08; lo -= pad; hi += pad;
+  const pad = (hi - lo || hi * 0.002) * 0.1; lo -= pad; hi += pad;
   const W = Math.max(280, Math.round(($('#view').clientWidth || 360) - 28)), H = 220, R = 54, B = 18, T = 6, pw = W - R, ph = H - T - B;
   const x = i => (i + 0.5) * (pw / bars.length), y = v => T + (hi - v) / (hi - lo) * ph, cw = Math.max(1, pw / bars.length * 0.66);
-  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': `${sym} 1-minute candles` });
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': '1-minute candles' });
+  if (shade) svg.append(svgEl('rect', { x: x(shade[0]) - cw, y: T, width: Math.max(2, x(shade[1]) - x(shade[0]) + 2 * cw), height: ph, class: 'shade' }));
   const last = bars[bars.length - 1];
   const shown = levels.filter(([, v]) => v != null && v >= lo && v <= hi);
   const taken = shown.map(([, v]) => y(v)).concat([y(last.c)]);   // right-axis spots used by lines and the last price
@@ -351,7 +340,7 @@ function drawChart(p, s) {
     if (taken.every(t => Math.abs(t - yy) > 12)) svg.append(svgEl('text', { x: pw + 4, y: yy + 3, class: 'ax' }, v.toFixed(2)));
   }
   bars.forEach((b, i) => {                        // candles
-    const up = b.c >= b.o, k = (up ? 'c-up' : 'c-dn') + (b.live ? ' live' : '');
+    const k = (b.c >= b.o ? 'c-up' : 'c-dn') + (b.live ? ' live' : '');
     svg.append(svgEl('line', { x1: x(i), x2: x(i), y1: y(b.h), y2: y(b.l), class: 'wick ' + k }),
       svgEl('rect', { x: x(i) - cw / 2, y: y(Math.max(b.o, b.c)), width: cw, height: Math.max(1, Math.abs(y(b.o) - y(b.c))), class: 'body ' + k }));
   });
@@ -359,30 +348,54 @@ function drawChart(p, s) {
     const pts = vs.map((v, i) => v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`).filter(Boolean).join(' ');
     if (pts) svg.append(svgEl('polyline', { points: pts, class: k }));
   }
-  for (const [k, v, label] of shown) {            // entry / stop / target and strategy levels: name inside, price on the axis
+  for (const [k, v, label] of shown) {            // level lines: name inside, price on the axis
     const yy = y(v), above = yy > T + 12;
     svg.append(svgEl('line', { x1: 0, x2: pw, y1: yy, y2: yy, class: k }),
       svgEl('text', { x: 4, y: above ? yy - 3 : yy + 11, class: 'tag ' + k }, label));
     if (Math.abs(yy - y(last.c)) > 12) svg.append(svgEl('text', { x: pw + 4, y: yy + 3, class: 'tag ' + k }, v.toFixed(2)));
   }
-  // last price marker
+  for (const m of markers) {                      // buy ▲ under the candle, sell ▼ above it
+    const b = bars[m.i]; if (!b) continue;
+    const cx = x(m.i), up = m.side === 'buy', ty = up ? y(b.l) + 4 : y(b.h) - 4, d = up ? 7 : -7;
+    svg.append(svgEl('path', { d: `M${cx} ${ty} l-5 ${d} h10 z`, class: 'mark ' + (up ? 'm-buy' : 'm-sell') }),
+      svgEl('text', { x: Math.min(Math.max(cx, 30), pw - 30), y: up ? ty + 20 : ty - 12, class: 'mtext mid ' + (up ? 'm-buy' : 'm-sell') }, m.label));
+  }
   svg.append(svgEl('rect', { x: pw + 1, y: y(last.c) - 7, width: R - 2, height: 14, rx: 3, class: 'pricetag ' + (last.c >= last.o ? 'c-up' : 'c-dn') }),
     svgEl('text', { x: pw + 5, y: y(last.c) + 3.5, class: 'pricetxt' }, last.c.toFixed(2)));
   const ticks = [0, Math.floor((bars.length - 1) / 2), bars.length - 1];
   for (const i of [...new Set(ticks)]) svg.append(svgEl('text', { x: Math.min(Math.max(x(i), 14), pw - 14), y: H - 4, class: 'ax mid' }, String(bars[i].t).slice(11, 16)));
-  const sel = chart.pick[sym];
+  const sel = chart.pick[pickKey];
   if (sel != null && bars[sel]) svg.append(svgEl('line', { x1: x(sel), x2: x(sel), y1: T, y2: T + ph, class: 'cross' }));
   const hit = svgEl('rect', { x: 0, y: 0, width: pw, height: H, class: 'hit' });
-  const pickAt = ev => { ev.stopPropagation(); const r = svg.getBoundingClientRect(); const i = Math.floor((ev.clientX - r.left) / r.width * W / (pw / bars.length));
-    chart.pick[sym] = Math.max(0, Math.min(bars.length - 1, i)); renderHome(); };
-  hit.addEventListener('click', pickAt);
+  hit.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const r = svg.getBoundingClientRect(), i = Math.floor((ev.clientX - r.left) / r.width * W / (pw / bars.length));
+    chart.pick[pickKey] = Math.max(0, Math.min(bars.length - 1, i)); rerender();
+  });
   svg.append(hit);
   const b = bars[sel != null && bars[sel] ? sel : bars.length - 1];
   const info = h('div', { class: 'chartinfo' }, h('span', { class: 'muted', text: String(b.t).slice(11, 16) + (b.live ? ' (forming)' : '') }),
     ` O ${b.o.toFixed(2)}  H ${b.h.toFixed(2)}  L ${b.l.toFixed(2)}  C `, h('b', { class: b.c >= b.o ? 'up' : 'dn', text: b.c.toFixed(2) }));
-  const legend = h('div', { class: 'legend' }, h('span', { class: 'k ln-entry', text: 'Entry' }), h('span', { class: 'k ln-stop', text: 'Stop' }),
-    h('span', { class: 'k ln-tgt', text: 'Target' }), series.map(([k, , label]) => h('span', { class: 'k ' + k, text: label })));
-  box.append(chips, info, svg, legend);
+  return [info, svg];
+}
+function legendOf(items) { return h('div', { class: 'legend' }, items.map(([k, label]) => h('span', { class: 'k ' + k, text: label }))); }
+function drawChart(p, s) {
+  const sym = p.symbol, all = liveBars(chart.bars[sym] || [], p.ltp, s.now);
+  const box = h('div', { class: 'chartbox' });
+  const chips = h('div', { class: 'choices tight' }, RANGES.map(([name]) => h('button', { class: 'chip' + (chart.range === name ? ' on' : ''), text: name,
+    onclick: ev => { ev.stopPropagation(); chart.range = name; chart.pick = {}; renderHome(); } })));
+  if (!all.length) { box.append(chips, h('p', { class: 'muted small m0', text: chart.loading.has(sym) ? 'Loading candles…' : 'No candles yet today.' })); return box; }
+  const n = RANGES.find(r => r[0] === chart.range)[1], start = Math.max(0, all.length - n), bars = all.slice(start);
+  const st = (s.strategy_state || {})[sym] || {}, sp = strategyParams((s.strategies || {})[sym] || s.strategy);
+  const closesAll = all.map(b => b.c), series = [];
+  if (sp.name === 'ema_cross' && sp.fast && sp.slow) {
+    series.push(['ema-f', emaSeries(closesAll, sp.fast).slice(start), `${sp.fast}-min avg`], ['ema-s', emaSeries(closesAll, sp.slow).slice(start), `${sp.slow}-min avg`]);
+  }
+  const levels = [['ln-entry', p.avg, 'Entry'], ['ln-stop', p.stop, 'Stop'], ['ln-tgt', p.target, 'Target']];
+  if ('range_high' in st) levels.push(['ln-lvl', st.range_high, 'Range high'], ['ln-lvl', st.range_low, 'Range low']);
+  if ('vwap' in st) levels.push(['ln-lvl', st.vwap, 'VWAP'], ['ln-lvl', st.buy_below, 'Buy below'], ['ln-lvl', st.sell_above, 'Sell above']);
+  const [info, svg] = candleSvg(bars, { levels, series, pickKey: sym, rerender: renderHome });
+  box.append(chips, info, svg, legendOf([['ln-entry', 'Entry'], ['ln-stop', 'Stop'], ['ln-tgt', 'Target'], ...series.map(([k, , l]) => [k, l])]));
   return box;
 }
 function positionCard(p, s) {
@@ -400,30 +413,80 @@ function positionCard(p, s) {
 async function refreshStatus() { try { state.status = await get('/api/status'); renderHome(); } catch (_) {} }
 
 // ───────────────────────────── trades ─────────────────────────────
+const trades = { day: null, data: null, open: new Set(), bars: {}, loading: new Set(), range: 'Trade' };
+const REASONS = { target: 'target', stop_loss: 'stop loss', signal: 'signal', squareoff: 'market-close exit', flatten: 'flatten',
+  max_daily_loss: 'daily loss limit', kill: 'emergency stop', end_of_day: 'end of day' };
 async function renderTrades(day) {
-  const view = $('#view');
   const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);    // IST date
-  day = day || today;
-  const shift = n => { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); const x = d.toISOString().slice(0, 10); return x > today ? today : x; };
+  day = day || trades.day || today;
+  if (day !== trades.day) { trades.open.clear(); trades.data = null; }
+  trades.day = day;
+  drawTrades(today);
+  try { trades.data = await get('/api/trades?date=' + encodeURIComponent(day)); } catch (e) { trades.data = { error: e.message }; }
+  if (state.tab === 'trades' && trades.day === day) drawTrades(today);
+}
+async function loadTradeBars(sym, day) {
+  const key = `${sym}|${day}`;
+  if (trades.bars[key] || trades.loading.has(key)) return;
+  trades.loading.add(key);
+  try {
+    const d = await get(`/api/bars?symbol=${encodeURIComponent(sym)}&date=${encodeURIComponent(day)}`);
+    trades.bars[key] = d.bars.map(([t, o, hi, lo, c]) => ({ t, o, h: hi, l: lo, c }));
+  } catch (_) { trades.bars[key] = []; }
+  trades.loading.delete(key);
+  if (state.tab === 'trades') drawTrades();
+}
+function tradeChart(r, day) {
+  const key = `${r.symbol}|${day}`, all = trades.bars[key];
+  const box = h('div', { class: 'chartbox' });
+  const chips = h('div', { class: 'choices tight' }, ['Trade', 'Day'].map(name => h('button', { class: 'chip' + (trades.range === name ? ' on' : ''), text: name,
+    onclick: ev => { ev.stopPropagation(); trades.range = name; chart.pick = {}; drawTrades(); } })));
+  if (!all) { loadTradeBars(r.symbol, day); box.append(h('p', { class: 'muted small m0', text: 'Loading candles…' })); return box; }
+  if (!all.length) { box.append(h('p', { class: 'muted small m0', text: 'No candles kept for this day (the chart history is about 2 weeks).' })); return box; }
+  const m16 = t => String(t).slice(0, 16);
+  let ei = all.findIndex(b => m16(b.t) >= m16(r.entry_ts)), xi = all.length - 1;
+  for (let i = all.length - 1; i >= 0; i--) if (m16(all[i].t) <= m16(r.exit_ts)) { xi = i; break; }
+  if (ei < 0) ei = 0;
+  const from = trades.range === 'Day' ? 0 : Math.max(0, ei - 15), to = trades.range === 'Day' ? all.length - 1 : Math.min(all.length - 1, xi + 15);
+  const bars = all.slice(from, to + 1), long = r.side !== 'SHORT';
+  const markers = [{ i: ei - from, side: long ? 'buy' : 'sell', label: `${long ? 'Buy' : 'Sell'} ${Number(r.entry_price).toFixed(2)}` },
+                   { i: xi - from, side: long ? 'sell' : 'buy', label: `${long ? 'Sell' : 'Buy'} ${Number(r.exit_price).toFixed(2)}` }];
+  const levels = [['ln-entry', Number(r.entry_price), 'Entry'], ['ln-lvl', Number(r.exit_price), 'Exit']];
+  const [info, svg] = candleSvg(bars, { levels, markers, shade: [ei - from, xi - from], pickKey: key + r.exit_ts, rerender: () => drawTrades() });
+  const sum = h('div', { class: 'chartinfo' }, `${hhmm(r.entry_ts)} → ${hhmm(r.exit_ts)} · ${REASONS[r.exit_reason] || r.exit_reason} · `,
+    h('b', { class: cls(r.net_pnl), text: inr(r.net_pnl) }), h('span', { class: 'muted', text: ` after ${price(r.charges)} fees` }));
+  box.append(chips, sum, info, svg, legendOf([['m-buy', 'Buy'], ['m-sell', 'Sell'], ['ln-entry', 'Entry price']]));
+  return box;
+}
+function drawTrades(today) {
+  const view = $('#view');
+  today = today || new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+  const day = trades.day, d = trades.data;
+  const shift = n => { const x = new Date(day + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); const v = x.toISOString().slice(0, 10); return v > today ? today : v; };
   const picker = h('input', { type: 'date', class: 'field', value: day, max: today, onchange: e => renderTrades(e.target.value) });
   const bar = h('div', { class: 'daybar' },
     h('button', { class: 'iconbtn', 'aria-label': 'Previous day', onclick: () => renderTrades(shift(-1)) }, icon('left')), picker,
     h('button', { class: 'iconbtn', 'aria-label': 'Next day', disabled: day >= today, onclick: () => renderTrades(shift(1)) }, icon('right')));
-  view.replaceChildren(bar, h('p', { class: 'muted center small', text: 'Loading…' }));
-  let d;
-  try { d = await get('/api/trades?date=' + encodeURIComponent(day)); } catch (e) { view.lastChild.textContent = e.message; return; }
+  if (!d) { view.replaceChildren(bar, h('p', { class: 'muted center small', text: 'Loading…' })); return; }
+  if (d.error) { view.replaceChildren(bar, h('div', { class: 'banner', text: d.error })); return; }
   const t = d.totals;
   const sum = h('div', { class: 'card hero' },
     h('div', { class: 'row' }, h('h2', { class: 'm0', text: day === today ? 'Today' : day }), h('span', { class: 'pill plain', text: `${t.trades} trade${t.trades === 1 ? '' : 's'}` })),
     h('div', { class: 'pnl ' + cls(t.net_pnl), text: inr(t.net_pnl) }),
     h('div', { class: 'grid2 mt8' }, stat('Won', `${t.win_rate_pct}%`), stat('Gross', inr(t.gross_pnl), cls(t.gross_pnl)), stat('Fees', price(t.charges)), stat('After fees', inr(t.net_pnl), cls(t.net_pnl))));
-  const rows = d.trades.map(r => h('tr', {},
-    h('td', {}, h('div', { text: r.symbol.replace(/-EQ$/, '') }), h('div', { class: 'small muted', text: `${hhmm(r.entry_ts)}–${hhmm(r.exit_ts)}` })),
-    h('td', { class: 'r' }, h('div', { text: `${r.qty} × ${Number(r.entry_price).toFixed(2)}` }), h('div', { class: 'small muted', text: `→ ${Number(r.exit_price).toFixed(2)}` })),
-    h('td', { class: 'r nw ' + cls(r.net_pnl), text: inr(r.net_pnl) })));
+  const rows = d.trades.flatMap(r => {
+    const key = `${r.symbol}|${r.exit_ts}`, open = trades.open.has(key);
+    const toggle = () => { open ? trades.open.delete(key) : trades.open.add(key); drawTrades(); };
+    const tr = h('tr', { class: 'tap' + (open ? ' open' : ''), onclick: toggle },
+      h('td', {}, h('div', { class: 'row' }, h('span', { text: r.symbol.replace(/-EQ$/, '') }), icon(open ? 'down' : 'chevron', 'i tiny')),
+        h('div', { class: 'small muted', text: `${hhmm(r.entry_ts)}–${hhmm(r.exit_ts)}` })),
+      h('td', { class: 'r' }, h('div', { text: `${r.qty} × ${Number(r.entry_price).toFixed(2)}` }), h('div', { class: 'small muted', text: `→ ${Number(r.exit_price).toFixed(2)}` })),
+      h('td', { class: 'r nw ' + cls(r.net_pnl), text: inr(r.net_pnl) }));
+    return open ? [tr, h('tr', {}, h('td', { class: 'chartcell', colspan: '3' }, tradeChart(r, day)))] : [tr];
+  });
   const table = d.trades.length ? h('div', { class: 'card scroll' }, h('table', {},
       h('thead', {}, h('tr', {}, h('th', { text: 'Stock' }), h('th', { class: 'r', text: 'In → out' }), h('th', { class: 'r', text: 'Net' }))),
-      h('tbody', {}, rows)))
+      h('tbody', {}, rows)), h('p', { class: 'hint', text: 'Tap a trade for its chart.' }))
     : h('p', { class: 'muted center small', text: 'No closed trades on this day.' });
   view.replaceChildren(bar, sum, table);
 }
