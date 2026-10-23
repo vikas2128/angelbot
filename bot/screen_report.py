@@ -22,6 +22,15 @@ h1{font:400 28px/1.15 Georgia,"Iowan Old Style",serif;margin:0 0 4px}h2{font-siz
 .sub,.note{color:var(--muted);font-size:13px;margin:0}
 .banner{display:flex;gap:10px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--muted);font-size:13px}
 .banner.decided{color:var(--fg);border-left:3px solid var(--accent)}
+.banner.decided i{background:var(--accent)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:10px 0 8px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px}.kpi .l{font-size:12px;color:var(--muted)}
+.kpi .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.whys{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.why{display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:13px}.why b{font-variant-numeric:tabular-nums}
+.why .bar{grid-column:1/-1;margin:0}
+h3.grp{font-size:13px;font-weight:600;margin:14px 0 0;display:flex;gap:6px}h3.grp span{color:var(--muted);font-weight:400}
+ul.plain.tight{margin-top:6px;gap:3px}.why-d{color:var(--muted)}
 .banner i{flex:none;width:8px;height:8px;border-radius:50%;background:var(--warn);margin-top:6px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
 .picks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px}
@@ -39,8 +48,8 @@ ul.plain{margin:12px 0 0;padding-left:18px;display:flex;flex-direction:column;ga
 footer{color:var(--muted);font-size:12px}
 .tag{display:inline-block;font-size:10px;font-weight:600;letter-spacing:.03em;padding:0 5px;margin-left:4px;border:1px solid var(--line);border-radius:4px;color:var(--muted);vertical-align:middle;line-height:16px}
 .tab-in{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
-.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap;margin-bottom:12px}
-.tabs label{color:var(--muted);font:600 14px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:10px 12px;margin-bottom:-1px;border-bottom:2px solid transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tabs label{color:var(--muted);font:600 13px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:8px 12px;border:1px solid var(--line);border-radius:999px;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .panel{display:none}
 .tabhint{color:var(--muted);font-size:12px;margin:8px 0 0}
 @media (max-width:480px){.hide-s{display:none}}
@@ -176,6 +185,29 @@ def decision_text(snap: dict, decision: dict | None) -> str | None:
     return f"Trading today (decided {when}, {who}): {names}."
 
 
+# the first gate a stock failed, as a short group name (for the "why nothing passed" summary)
+REASON_GROUPS = [("only ", "Too little history"), ("strategy check", "No strategy passed the check"),
+                 ("no strategy passed", "No strategy passed the check"), ("backtest", "Backtest check failed"),
+                 ("one share costs", "One share costs more than the amount"), ("cost ₹", "Order above the cap"),
+                 ("traded value", "Too little traded"), ("spread", "Spread too wide"), ("daily range", "Too little room vs fees")]
+
+
+def reason_group(reason: str) -> str:
+    for prefix, name in REASON_GROUPS:
+        if reason.startswith(prefix) or (prefix == "cost ₹" and prefix in reason):
+            return name
+    return "Other"
+
+
+def why_left_out(bad: list[dict]) -> list[tuple[str, int]]:
+    """[(group, stocks)], most first, counting each stock once by the first gate it failed."""
+    count: dict[str, int] = {}
+    for r in bad:
+        g = reason_group((r.get("excluded") or ["other"])[0])
+        count[g] = count.get(g, 0) + 1
+    return sorted(count.items(), key=lambda kv: -kv[1])
+
+
 def render_html(snap: dict, decision: dict | None = None, cfg: dict | None = None) -> str:
     p = snap["params"]
     ok = [r for r in snap["rows"] if not r["excluded"]]
@@ -209,7 +241,13 @@ def render_html(snap: dict, decision: dict | None = None, cfg: dict | None = Non
         f'{size_chip(r)}'
         f'<span>Traded/day<b>{esc(_num(r["traded_value_cr"], " cr"))}</b></span>{bt_chip(r)}</div></div>' for r in picks)
     if not picks:
-        cards = '<div class="card"><h2>No stock passed the gates today</h2><p class="note">See the excluded list below for why.</p></div>'
+        groups = why_left_out(bad)
+        top = max([n for _, n in groups] or [1])
+        rows_ = "".join(f'<div class="why"><span>{esc(g)}</span><b>{n}</b><div class="bar"><div style="width:{n / top * 100:.0f}%"></div></div></div>'
+                        for g, n in groups)
+        cards = ('<div class="card"><h2>No stock passed the gates today</h2>'
+                 f'<p class="note">Each stock is counted once, by the first check it failed. Details are under Left out.</p>'
+                 f'<div class="whys">{rows_}</div></div>')
 
     def gap_cell(v):
         cls = "" if v is None else ("up" if v > 0 else "dn" if v < 0 else "")
@@ -228,28 +266,40 @@ def render_html(snap: dict, decision: dict | None = None, cfg: dict | None = Non
                 f'</tr></thead><tbody>{body}</tbody></table></div>')
 
     # Tabs without JavaScript (a hidden radio button per tab; the label is the button), so they work in phone previews too
-    tabs = [("all", f"All ({len(ok)})", "Every stock that passed the gates, best first. Gap is today's open against yesterday's "
+    tabs = [] if not ok else [("all", f"All ({len(ok)})", "Every stock that passed the gates, best first. Gap is today's open against yesterday's "
              "close. Volume is the share of a normal day already traded. Traded is \u20b9 crore a day on average", table(ok))]
-    for x in snap.get("lists") or []:
+    for x in (snap.get("lists") or []) if ok else []:
         sub = [r for r in ok if x["tag"] in (r.get("indices") or [])]
         tabs.append((x["tag"].lower(), f"{x['title']} ({len(sub)})", f"{x['title']} stocks that passed the gates, best first", table(sub)))
     if bad:
-        items = "".join(f"<li><b>{esc(_name(r['symbol']))}</b>{_tags(r)}: {esc('; '.join(r['excluded']))}</li>" for r in bad)
-        tabs.append(("out", f"Left out ({len(bad)})", "These failed a gate, so they are not scored", f'<ul class="plain">{items}</ul>'))
+        groups: dict[str, list[dict]] = {}
+        for r in bad:
+            groups.setdefault(reason_group((r["excluded"] or ["other"])[0]), []).append(r)
+        def detail(r):                                     # the group heading already says which check it was
+            first = r["excluded"][0]
+            for pre in ("no strategy passed the check: ", "strategy check: ", "backtest check: "):
+                if first.startswith(pre):
+                    first = first[len(pre):]
+            return "; ".join([first] + r["excluded"][1:])
+        body_ = "".join(f'<h3 class="grp">{esc(g)} <span>{len(rs)}</span></h3><ul class="plain tight">'
+                        + "".join(f"<li><b>{esc(_name(r['symbol']))}</b>{_tags(r)} <span class=\"why-d\">{esc(detail(r))}</span></li>" for r in rs)
+                        + "</ul>" for g, rs in sorted(groups.items(), key=lambda kv: -len(kv[1])))
+        tabs.append(("out", f"Left out ({len(bad)})", "These failed a gate, so they are not scored. Grouped by the first check each failed",
+                     body_))
     sc = snap.get("strategy_compare")
     if sc and sc.get("per_stock") and sc.get("walk"):
         tabs.append(("strat", "Strategy check", walk_note(sc), walk_tables(sc)))
     elif sc and sc.get("totals"):
         tabs.append(("strat", "Strategies", strategy_note(sc), strategy_tables(sc)))
     tab_css = "".join(
-        f"#st-{k}:checked~.tabs label[for=st-{k}]{{color:var(--fg);border-bottom-color:var(--accent)}}"
+        f"#st-{k}:checked~.tabs label[for=st-{k}]{{color:#fff;background:var(--accent);border-color:var(--accent)}}"
         f"#st-{k}:focus-visible~.tabs label[for=st-{k}]{{outline:2px solid var(--accent);outline-offset:-2px}}"
         f"#st-{k}:checked~#sp-{k}{{display:block}}" for k, *_ in tabs)
     tabs_html = ('<section class="card">'
                  + "".join(f'<input class="tab-in" type="radio" name="st" id="st-{k}"{" checked" if i == 0 else ""}>' for i, (k, *_) in enumerate(tabs))
                  + '<nav class="tabs" role="tablist">' + "".join(f'<label for="st-{k}" role="tab">{esc(t)}</label>' for k, t, *_ in tabs) + "</nav>"
                  + "".join(f'<div class="panel" id="sp-{k}" role="tabpanel"><p class="note">{esc(n)}</p>{body}</div>' for k, _, n, body in tabs)
-                 + '<p class="tabhint">If tapping a tab does nothing, open this file in your phone\'s browser.</p></section>')
+                 + '<p class="tabhint">If tapping a tab does nothing, open this file in your phone\'s browser.</p></section>') if tabs else ""
     errs = ""
     if snap.get("errors"):
         items = "".join(f"<li>{esc(e)}</li>" for e in snap["errors"])
@@ -261,14 +311,15 @@ def render_html(snap: dict, decision: dict | None = None, cfg: dict | None = Non
     older = settings_changed(snap, cfg)
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
             f'<title>AngelBot screener {esc(snap.get("market_date", ""))}</title><style>{CSS}{tab_css}</style></head><body><div class="wrap">'
-            f'<header><h1>Stock screener</h1><p class="sub">{esc(date_label(snap))} · checked {snap["universe"]} stocks · '
-            f'{snap["eligible"]} passed the gates · built {esc(gen[11:16])} IST</p>'
+            f'<header><h1>Stock screener</h1><p class="sub">{esc(date_label(snap))} · built {esc(gen[11:16])} IST</p>'
+            f'<div class="kpis"><div class="kpi"><div class="l">Checked</div><div class="v">{snap["universe"]}</div></div>'
+            f'<div class="kpi"><div class="l">Passed the gates</div><div class="v">{snap["eligible"]}</div></div></div>'
             f'<p class="sub">Screened: {esc(lists_text(snap))}</p></header>'
             + (f'<div class="banner decided"><i></i><span><b>{esc(decided)}</b></span></div>' if decided else "")
             + (f'<div class="banner"><i></i><span>{esc(older)}</span></div>' if older else "") +
-            f'<div class="banner"><i></i><span>The screener places no orders. With morning selection on, the bot trades the '
-            f'top {int(p["top_n"])} that passed the checks; the score only orders them and has not been backtested itself.</span></div>'
             f'<section><div class="picks">{cards}</div></section>{tabs_html}{errs}{how}'
+            f'<p class="note">The screener places no orders. With morning selection on, the bot trades the top {int(p["top_n"])} '
+            'that passed the checks; the score only orders them and has not been backtested itself.</p>'
             '<footer>Read-only analytics from market data. No orders are placed by the screener.</footer></div></body></html>')
 
 

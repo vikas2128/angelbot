@@ -313,3 +313,16 @@ def test_a_screen_from_older_settings_says_so():
     snap["lists"] = [{"name": "nifty50", "title": "Nifty 50", "tag": "N50", "count": 50},
                      {"name": "banknifty", "title": "Bank Nifty", "tag": "BANK", "count": 14}]
     assert "earlier settings" not in render_html(snap, None, cfg)                      # same settings: no note
+
+
+def test_a_day_with_nothing_passed_explains_why_and_opens_on_left_out():
+    from bot.screen_report import reason_group, why_left_out
+    snap = rank([raw(f"THIN{i}-EQ", daily=daily(vol=500)) for i in range(3)], params_from(None), CHARGES, NOW)
+    page = render_html(snap)
+    assert "No stock passed the gates today" in page and '<div class="why"><span>Too little traded</span><b>3</b>' in page
+    assert '<input class="tab-in" type="radio" name="st" id="st-out" checked>' in page and 'for="st-all"' not in page
+    assert reason_group("spread 0.30% is above 0.10%") == "Spread too wide"
+    assert reason_group("5 shares cost ₹60,000, above the ₹50,000 order cap") == "Order above the cap"
+    assert reason_group("one share costs ₹12,000, more than your ₹10,000 per trade") == "One share costs more than the amount"
+    assert why_left_out([{"excluded": ["backtest lost ₹5.00 after fees"]}, {"excluded": ["only 3 days of history (need 10)"]},
+                         {"excluded": ["backtest made only 2 trades"]}]) == [("Backtest check failed", 2), ("Too little history", 1)]

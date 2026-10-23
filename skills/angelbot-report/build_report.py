@@ -279,7 +279,7 @@ def nice_ticks(lo: float, hi: float, count: int) -> list[float]:
 
 
 def svg_equity(equity: list[dict]) -> str:
-    W, H, ml, mr, mt, mb = 440, 250, 58, 68, 12, 30
+    W, H, ml, mr, mt, mb = 440, 250, 58, 18, 28, 30
     pts = [(0, 0.0, "")] + [(p["n"], p["cum"], p["ts"]) for p in equity]
     ticks = nice_ticks(min(0, min(c for _, c, _ in pts)), max(0, max(c for _, c, _ in pts)), 5)
     lo, hi = ticks[0], ticks[-1]
@@ -292,11 +292,12 @@ def svg_equity(equity: list[dict]) -> str:
                  f'<text class="t" x="{ml - 8}" y="{Y(t) + 4:.1f}" text-anchor="end">{esc(axis(t))}</text>')
     o.append(f'<line class="zl" x1="{ml}" x2="{W - mr}" y1="{Y(0):.1f}" y2="{Y(0):.1f}"/>')
     for n in sorted({round(maxn * i / 3) for i in range(1, 4)}):
-        o.append(f'<text class="t" x="{X(n):.1f}" y="{H - 8}" text-anchor="middle">Trade {n}</text>')
+        o.append(f'<text class="t" x="{X(n):.1f}" y="{H - 8}" text-anchor="{"end" if n == maxn else "middle"}">Trade {n}</text>')
     o.append('<path class="ln" d="' + " ".join(f'{"L" if i else "M"}{X(n):.1f} {Y(c):.1f}' for i, (n, c, _) in enumerate(pts)) + '"/>')
     n, c, _ = pts[-1]
     o.append(f'<circle class="dt" cx="{X(n):.1f}" cy="{Y(c):.1f}" r="4"/>'
-             f'<text class="tb" x="{X(n) + 8:.1f}" y="{Y(c) + 4:.1f}">{esc(money(c))}</text>')
+             # the label sits above the end point (below it when the end is at the top), right-aligned so it stays inside
+             f'<text class="tb" x="{X(n):.1f}" y="{Y(c) - 10 if Y(c) > mt + 20 else Y(c) + 22:.1f}" text-anchor="end">{esc(money(c))}</text>')
     for n, c, ts in pts[1:]:                                  # native hover text where the viewer has a pointer
         when = f"{day_label(ts[:10])}, {ts[11:16]} · " if ts else ""
         o.append(f'<circle class="hit" cx="{X(n):.1f}" cy="{Y(c):.1f}" r="6"><title>{esc(when)}trade {n}: {esc(money(c))} running</title></circle>')
@@ -337,7 +338,9 @@ def kpis_html(k: dict) -> str:
              ("Fees paid", "−" + plain(k["fees"]), "Brokerage, taxes and charges", False)]
     return '<section class="kpis">' + "".join(
         f'<div class="card kpi"><div class="l">{esc(l)}</div><div class="v{" bad" if bad else ""}">{esc(v)}</div>'
-        f'<div class="n">{esc(n)}</div></div>' for l, v, n, bad in cards) + "</section>"
+        f'<div class="n">{esc(n)}</div></div>' for l, v, n, bad in cards) + "</section>" + \
+        ('<p class="note kpinote">Net is after all fees. Profit factor is net wins ÷ net losses (above 1 is profitable). '
+         'Max drawdown is the biggest fall from a peak.</p>')
 
 
 def fees_html(k: dict) -> str:

@@ -96,9 +96,19 @@ h2{font-size:12px!important}.ph{font:700 16px/1.25 -apple-system,system-ui,sans-
 .pick .sym{font:700 16px/1.2 -apple-system,system-ui,sans-serif!important}.pick .sc b{font-size:15px!important}
 .chips b{font-size:13px!important}.take{font-size:13.5px!important}
 table{font-size:12px!important}th,td{padding:6px 4px!important}
-.tabs{margin-bottom:6px!important}.tabs label{font-size:13px!important;padding:7px 10px!important}
+.tabs{margin-bottom:8px!important}.tabs label{font-size:12.5px!important;padding:7px 11px!important}
+ul.plain{font-size:12.5px!important;gap:5px!important}.why{font-size:12.5px!important}h3.grp{font-size:12.5px!important}
+.kpis{margin:8px 0 6px!important}.kpi{padding:6px 10px!important;border:0!important}
 .bar .lab,.bar .num{font-size:12px!important}
 .tabhint,footer{display:none!important}
+/* report: the app's title bar already names it; six compact tiles in three columns, the notes in one line under them */
+.wrap>header:has(+.tab-in){display:none}
+.panel>.kpis{grid-template-columns:repeat(3,1fr)!important;gap:6px!important}
+.panel>.kpis .kpi{padding:8px 9px!important}.panel>.kpis .kpi .n{display:none}
+.panel>.kpis .kpi .v{font-size:16px!important;white-space:nowrap}.panel>.kpis .kpi .l{font-size:11px!important}
+.kpinote{display:block!important;font-size:11px!important}
+.take{font-size:13.5px!important}.ph{font-size:16px!important}
+.tabs{border:0!important}.tabs label{padding:7px 16px!important}.panel{gap:10px!important}
 </style>"""
 
 

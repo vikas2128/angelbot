@@ -540,6 +540,17 @@ function tradeChart(r, day) {
   box.append(chips, sum, info, svg, legendOf([['m-buy', 'Buy'], ['m-sell', 'Sell'], ['ln-entry', 'Entry price']]));
   return box;
 }
+function dayCurve(list) {
+  const W = 300, H = 46, pts = [0];
+  for (const r of list) pts.push(pts[pts.length - 1] + Number(r.net_pnl || 0));
+  const lo = Math.min(0, ...pts), hi = Math.max(0, ...pts), span = hi - lo || 1;
+  const x = i => 4 + i / (pts.length - 1) * (W - 8), y = v => 4 + (hi - v) / span * (H - 8);
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'dcurve mt8', role: 'img', 'aria-label': 'running result over the day' });
+  svg.append(svgEl('line', { x1: 0, x2: W, y1: y(0), y2: y(0), class: 'zero' }),
+    svgEl('polyline', { points: pts.map((v, i) => `${x(i)},${y(v)}`).join(' '), class: 'run ' + (pts[pts.length - 1] >= 0 ? 'up' : 'dn') }),
+    ...pts.slice(1).map((v, i) => svgEl('circle', { cx: x(i + 1), cy: y(v), r: 2.5, class: 'pt ' + (Number(list[i].net_pnl) > 0 ? 'up' : 'dn') })));
+  return svg;
+}
 function drawTrades(today) {
   const view = $('#view');
   today = today || new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
@@ -551,25 +562,40 @@ function drawTrades(today) {
     h('button', { class: 'iconbtn', 'aria-label': 'Next day', disabled: day >= today, onclick: () => renderTrades(shift(1)) }, icon('right')));
   if (!d) { view.replaceChildren(bar, h('p', { class: 'muted center small', text: 'Loading…' })); return; }
   if (d.error) { view.replaceChildren(bar, h('div', { class: 'banner', text: d.error })); return; }
-  const t = d.totals;
+  const t = d.totals, list = d.trades, n = list.length;
+  const wins = list.filter(r => Number(r.net_pnl) > 0).length;
+  const reasons = {};
+  for (const r of list) { const k = REASONS[r.exit_reason] || r.exit_reason || 'other'; reasons[k] = (reasons[k] || 0) + 1; }
   const sum = h('div', { class: 'card hero' },
-    h('div', { class: 'row' }, h('h2', { class: 'm0', text: day === today ? 'Today' : day }), h('span', { class: 'pill plain', text: `${t.trades} trade${t.trades === 1 ? '' : 's'}` })),
+    h('div', { class: 'row' }, h('h2', { class: 'm0', text: day === today ? 'Today' : dayName(day) }),
+      h('span', { class: 'pill plain', text: `${n} trade${n === 1 ? '' : 's'}` })),
     h('div', { class: 'pnl ' + cls(t.net_pnl), text: inr(t.net_pnl) }),
-    h('div', { class: 'grid2 mt8' }, stat('Won', `${t.win_rate_pct}%`), stat('Gross', inr(t.gross_pnl), cls(t.gross_pnl)), stat('Fees', price(t.charges)), stat('After fees', inr(t.net_pnl), cls(t.net_pnl))));
-  const rows = d.trades.flatMap(r => {
-    const key = `${r.symbol}|${r.exit_ts}`, open = trades.open.has(key);
+    h('div', { class: 'meta', text: `After fees · gross ${inr(t.gross_pnl)} − fees ${price(t.charges)}` }),
+    n ? h('div', { class: 'grid3 mt12' }, stat('Won', `${wins} of ${n}`, wins ? 'up' : ''), stat('Avg trade', inr(t.net_pnl / n), cls(t.net_pnl)),
+      stat('Fees / trade', price(t.charges / n))) : null,
+    n > 1 ? dayCurve(list) : null,
+    n ? h('p', { class: 'hint', text: (n > 1 ? 'Line: running total after each trade. ' : '') + 'Exits: ' + Object.entries(reasons).map(([k, v]) => `${k} ${v}`).join(' · ') }) : null);
+  const multi = new Set(list.map(r => r.strategy || '')).size > 1;
+  const rows = list.map(r => {
+    const key = `${r.symbol}|${r.exit_ts}`, open = trades.open.has(key), long = r.side !== 'SHORT';
     const toggle = () => { open ? trades.open.delete(key) : trades.open.add(key); drawTrades(); };
-    const tr = h('tr', { class: 'tap' + (open ? ' open' : ''), onclick: toggle },
-      h('td', {}, h('div', { class: 'row' }, h('span', { text: r.symbol.replace(/-EQ$/, '') }), icon(open ? 'down' : 'chevron', 'i tiny')),
-        h('div', { class: 'small muted', text: `${hhmm(r.entry_ts)}–${hhmm(r.exit_ts)}` })),
-      h('td', { class: 'r' }, h('div', { text: `${r.qty} × ${Number(r.entry_price).toFixed(2)}` }), h('div', { class: 'small muted', text: `→ ${Number(r.exit_price).toFixed(2)}` })),
-      h('td', { class: 'r nw ' + cls(r.net_pnl), text: inr(r.net_pnl) }));
-    return open ? [tr, h('tr', {}, h('td', { class: 'chartcell', colspan: '3' }, tradeChart(r, day)))] : [tr];
+    const mins = Math.round((Date.parse(r.exit_ts) - Date.parse(r.entry_ts)) / 60000);
+    const move = (Number(r.exit_price) - Number(r.entry_price)) / Number(r.entry_price) * 100 * (long ? 1 : -1);
+    const item = h('div', { class: 'trow' + (open ? ' open' : ''), role: 'button', tabindex: '0', onclick: toggle,
+      onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } } },
+      h('div', { class: 'tmain' },
+        h('div', { class: 'tline' }, h('span', { class: 'tag ' + (long ? 'buy' : 'sell'), text: long ? 'LONG' : 'SHORT' }),
+          h('b', { text: r.symbol.replace(/-EQ$/, '') }), multi && r.strategy ? h('span', { class: 'small muted', text: STRAT_SHORT[r.strategy] || r.strategy }) : null,
+          h('span', { class: 'grow' }), h('b', { class: 'nw ' + cls(r.net_pnl), text: inr(r.net_pnl) })),
+        h('div', { class: 'tline small muted' }, h('span', { text: `${hhmm(r.entry_ts)} → ${hhmm(r.exit_ts)} · ${mins} min · ${REASONS[r.exit_reason] || r.exit_reason || ''}` }),
+          h('span', { class: 'grow' }), h('span', { class: 'nw', text: `fees ${price(r.charges)}` })),
+        h('div', { class: 'tline small' }, h('span', { text: `${r.qty} × ${price(r.entry_price)} → ${price(r.exit_price)}` }),
+          h('span', { class: 'grow' }), h('span', { class: 'nw ' + cls(move), text: pct(move) }))),
+      icon(open ? 'down' : 'chevron', 'i tiny'));
+    return open ? [item, h('div', { class: 'tchart' }, tradeChart(r, day))] : [item];
   });
-  const table = d.trades.length ? h('div', { class: 'card scroll' }, h('table', {},
-      h('thead', {}, h('tr', {}, h('th', { text: 'Stock' }), h('th', { class: 'r', text: 'In → out' }), h('th', { class: 'r', text: 'Net' }))),
-      h('tbody', {}, rows)), h('p', { class: 'hint', text: 'Tap a trade for its chart.' }))
-    : h('p', { class: 'muted center small', text: 'No closed trades on this day.' });
+  const table = n ? h('div', { class: 'card' }, h('div', { class: 'tlist' }, rows.flat()), h('p', { class: 'hint', text: 'Tap a trade for its chart.' }))
+    : h('div', { class: 'card' }, h('p', { class: 'muted center small m0', text: 'No closed trades on this day.' }));
   view.replaceChildren(bar, sum, table);
 }
 

@@ -174,3 +174,19 @@ svg.sprog{width:100%;height:6px;display:block}svg.sprog .rail{fill:var(--line)}s
 .snext .tag{font-size:10px;font-weight:700;letter-spacing:.04em;border-radius:5px;padding:2px 6px;background:var(--chip)}
 .snext .tag.buy{color:var(--ok)}.snext .tag.sell{color:var(--bad)}.snext .tag.done{color:var(--muted)}
 .snext .away{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+/* trades list */
+.daybar{background:var(--panel);border-radius:12px;padding:4px}
+.daybar input.field{height:32px;border:0;background:transparent;text-align:center;font-size:16px;font-weight:600}
+.tlist{display:flex;flex-direction:column}
+.trow{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:.5px solid var(--line);cursor:pointer}
+.trow.open{border-bottom:0}.tlist>:last-child{border-bottom:0}
+.tmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.tline{display:flex;align-items:center;gap:6px;min-width:0;font-variant-numeric:tabular-nums}.tline .grow{flex:1}
+.tline>span:first-child:not(.tag){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow .tag,.snext .tag{font-size:10px;font-weight:700;letter-spacing:.04em;border-radius:5px;padding:2px 6px;background:var(--chip)}
+.trow .tag.buy{color:var(--ok)}.trow .tag.sell{color:var(--bad)}
+.tchart{padding:0 0 10px;border-bottom:.5px solid var(--line)}
+svg.dcurve{width:100%;height:auto;display:block}
+svg.dcurve .zero{stroke:var(--line);stroke-dasharray:3 3}
+svg.dcurve .run{fill:none;stroke-width:2;stroke-linejoin:round}svg.dcurve .run.up{stroke:var(--ok)}svg.dcurve .run.dn{stroke:var(--bad)}
+svg.dcurve .pt.up{fill:var(--ok)}svg.dcurve .pt.dn{fill:var(--bad)}
