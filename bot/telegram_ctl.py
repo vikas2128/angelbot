@@ -26,6 +26,7 @@ from types import SimpleNamespace
 
 import requests
 
+from bot import actions as A
 from bot import config as C
 from bot import control, notify
 from bot import messages as M
@@ -55,7 +56,7 @@ HELP = (
 
 KILL_TTL_SEC = 60          # a "Yes, stop everything" button works for one minute only
 CONFIRM_TTL_SEC = 60       # same for "Yes, restart" and "Yes, reset"
-RESTART_CMD = ["systemctl", "--user", "--no-block", "restart", "angelbot@paper.service"]
+RESTART_CMD = A.RESTART_CMD
 RESTART_RUNNER = subprocess.run          # replaced in tests
 
 COMMANDS = [("status", "Status and open position"), ("pnl", "Today's trades and result"),
@@ -222,7 +223,7 @@ def kill_ask() -> tuple[str, list[list[dict]]]:
 
 
 def kill_do() -> str:
-    control.set_control(kill=True, note="telegram kill")
+    A.kill("telegram")
     return ("⛔ <b>Kill switch set</b>\nThe bot closes positions within about a second if it is running, "
             "then stops (left paused).\nCheck /status and the Angel One app. Use /resume before the next session.")
 
@@ -235,17 +236,7 @@ def _fresh(stamp: str, now: float | None) -> bool:
         return False
 
 
-def restart_refusal() -> str | None:
-    """Why the bot cannot be restarted from Telegram right now (None: it can)."""
-    if os.environ.get("ANGELBOT_PROFILE") != "paper":
-        return "Restarting from Telegram is only for the paper area. Restart this one on the VM yourself."
-    s = control.read_status()
-    if not s.get("bot_alive") or s.get("replay"):
-        return "The bot isn't running, so there is nothing to restart: the changes apply at its next start."
-    if s.get("positions") or s.get("pending_orders"):
-        return ("The bot has an open position or a waiting order. A paper position lives only in the bot's memory "
-                "and a restart would lose it, so restart after it closes.")
-    return None
+restart_refusal = A.restart_refusal
 
 
 def settings_card(note: str = "") -> tuple[str, list[list[dict]]]:
@@ -291,7 +282,7 @@ def settings_choices(sid: str) -> tuple[str, list[list[dict]]]:
 def settings_set(arg: str) -> tuple[str, list[list[dict]]]:
     sid, _, idx = arg.partition(":")
     try:
-        old, new = ST.apply(sid, int(idx) if idx.isdigit() else -1, now=now_ist())
+        old, new = A.set_setting(sid, int(idx) if idx.isdigit() else -1)
     except ValueError as e:                          # SettingsError: a bad id or choice, or a result that fails validation
         return settings_card(f"⚠️ {html.escape(str(e))}")
     label = ST.BY_ID[sid]["label"]
@@ -306,7 +297,7 @@ def settings_amount(arg: str) -> tuple[str, list[list[dict]]]:
     if not arg:
         return settings_choices("amount")
     try:
-        old, new = ST.apply_value("amount", "0" if arg.lower() == "off" else arg, now=now_ist())
+        old, new = A.set_setting("amount", value="0" if arg.lower() == "off" else arg)
     except ValueError as e:
         return settings_card(f"⚠️ {html.escape(str(e))}")
     return settings_card(f"✅ Saved: Amount per trade {html.escape(old)} → <b>{html.escape(new)}</b>. "
@@ -331,19 +322,12 @@ def restart_ask() -> tuple[str, list[list[dict]]]:
 def restart_do(stamp: str, now: float | None = None) -> tuple[str, list[list[dict]]]:
     if not _fresh(stamp, now):
         return settings_card("That confirmation expired. Tap Restart again.")
-    why = restart_refusal()                          # check again: things may have changed since the question
-    if why:
-        return settings_card(f"ℹ️ Not restarted: {why}")
-    try:
-        r = RESTART_RUNNER(RESTART_CMD, capture_output=True, text=True, timeout=30)
-        ok, err = r.returncode == 0, (r.stderr or "").strip()
-    except Exception as e:
-        ok, err = False, str(e)
+    if restart_refusal():                            # check again: things may have changed since the question
+        return settings_card(f"ℹ️ Not restarted: {restart_refusal()}")
+    ok, err = A.restart("telegram", runner=RESTART_RUNNER)
     if not ok:
-        log.warning("restart failed: %s", err)
         return (f"⚠️ <b>Restart failed</b>: {html.escape(err[:300])}\nOn the VM run:\n"
                 "<code>systemctl --user restart angelbot@paper</code>", [[_btn("⚙️ Settings", "cfg")]])
-    log.warning("bot restart requested from Telegram")
     return ("🔄 <b>Restarting the paper bot</b>. Its start message follows shortly; check /status in a minute.",
             [[_btn("📊 Status", "status"), _btn("☰ Menu", "menu")]])
 
@@ -360,7 +344,7 @@ def reset_ask() -> tuple[str, list[list[dict]]]:
 def reset_do(stamp: str, now: float | None = None) -> tuple[str, list[list[dict]]]:
     if not _fresh(stamp, now):
         return settings_card("That confirmation expired. Tap Reset again.")
-    n = ST.reset(now=now_ist())
+    n = A.reset_settings()
     return settings_card(f"✅ Reset {n} setting(s) to config.yaml. It applies from the next start.")
 
 
@@ -388,10 +372,10 @@ def route(text: str) -> tuple[str, list[list[dict]] | None]:
     if cmd == "/amount":
         return settings_amount(arg)
     if cmd == "/pause":
-        control.set_control(paused=True, note="telegram pause")
+        A.pause("telegram")
         return "⏸ <b>Paused</b>: no new trades. Open positions keep their safety exit, goal and market-close exit.", main_menu()
     if cmd == "/resume":
-        control.set_control(paused=False, kill=False, note="telegram resume")
+        A.resume("telegram")
         return "▶️ <b>Resumed</b>: new trades allowed.", main_menu()
     if cmd == "/kill":
         if arg != "CONFIRM":

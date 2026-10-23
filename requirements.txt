@@ -6,3 +6,5 @@ requests>=2.31
 PyYAML>=6.0
 mcp>=1.10
 pytest>=8.0
+starlette>=0.40     # the app's API (also installed by mcp)
+uvicorn>=0.30

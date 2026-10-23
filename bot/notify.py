@@ -1,4 +1,5 @@
-"""Optional Telegram alerts. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env.
+"""Alerts: written to the area's alert outbox (bot/alerts.py, for the app) and, if TELEGRAM_BOT_TOKEN and
+TELEGRAM_CHAT_ID are set, sent to Telegram.
 
 Text is sent as Telegram HTML; build it with bot.messages (which escapes dynamic values).
 """
@@ -52,8 +53,12 @@ def plain(text: str) -> str:
 
 
 def send(text: str, buttons: list[list[dict]] | None = None) -> None:
+    if _muted:
+        return
+    from bot import alerts
+    alerts.append(text, plain(text), plain(label()))      # the app's outbox; never raises, never waits
     token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
-    if _muted or not token or not chat:
+    if not token or not chat:
         return
     text = f"{label()}\n{text}"
 

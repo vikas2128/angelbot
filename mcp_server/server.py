@@ -32,6 +32,7 @@ if "ANGELBOT_RUNTIME" not in os.environ:
         os.environ["ANGELBOT_RUNTIME"] = str(ROOT / "runtime" / _area)
 
 from bot import config as C  # noqa: E402
+from bot import actions as A  # noqa: E402
 from bot import control  # noqa: E402
 from bot import settings as ST  # noqa: E402
 from bot.journal import query_readonly  # noqa: E402
@@ -304,13 +305,13 @@ def search_instruments(query: str, exchange: str | None = None, limit: int = 20)
 @mcp.tool()
 def pause_bot(reason: str = "") -> dict:
     """Stop NEW entries. Open positions keep their stop-loss/target/square-off management."""
-    return control.set_control(paused=True, note=f"claude pause: {reason}")
+    return A.pause(f"claude: {reason}" if reason else "claude")
 
 
 @mcp.tool()
 def resume_bot() -> dict:
     """Allow new entries again (clears pause and any leftover kill flag)."""
-    return control.set_control(paused=False, kill=False, note="claude resume")
+    return A.resume("claude")
 
 
 @mcp.tool()
@@ -319,7 +320,7 @@ def kill_switch(confirm: str, reason: str = "") -> dict:
     Only use when the user explicitly asks. `confirm` must be exactly "FLATTEN"."""
     if confirm != "FLATTEN":
         return {"ok": False, "error": 'confirm must be exactly "FLATTEN"'}
-    c = control.set_control(kill=True, note=f"claude kill: {reason}")
+    c = A.kill(f"claude: {reason}" if reason else "claude")
     return {"ok": True, "control": c,
             "note": "Bot will flatten within ~1s if running. Verify with bot_status and in the Angel One app."}
 
