@@ -43,3 +43,19 @@ class OpeningRangeBreakout(Strategy):
             self.fired.add(-1)
             return -1
         return None
+
+    def state(self, bars: list[Bar], ltp: float | None = None) -> dict:
+        """The opening range and the closes that would break it."""
+        out = super().state(bars, ltp)
+        if not bars:
+            return out
+        day_open = bars[0].start.replace(hour=9, minute=15, second=0, microsecond=0)
+        range_end = day_open + timedelta(minutes=int(self.p["range_minutes"]))
+        rng = [b for b in bars if day_open <= b.start < range_end]
+        out["range_done"] = bool(rng) and bars[-1].start >= range_end
+        if rng:
+            hi, lo = max(b.high for b in rng), min(b.low for b in rng)
+            buf = float(self.p["buffer_pct"]) / 100
+            out.update(range_high=round(hi, 2), range_low=round(lo, 2), buy_above=round(hi * (1 + buf), 2),
+                       sell_below=round(lo * (1 - buf), 2), fired=sorted(self.fired))
+        return out

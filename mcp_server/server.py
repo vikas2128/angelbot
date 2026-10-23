@@ -71,7 +71,10 @@ def _cfg() -> dict:
 @mcp.tool()
 def bot_status() -> dict:
     """Live bot status: alive?, mode (paper/live), day P&L, positions, pending orders,
-    halts, feed health, recent signals, and the current control flags."""
+    halts, feed health, recent signals, the current control flags, and strategy_state: per instrument, what the
+    strategy sees now (ema_cross: bars, fast/slow EMA, which is above, cross_price = the next 1-minute close that
+    would make them cross, and cross_move_pct from the last price; orb: range and break levels; vwap_revert: VWAP
+    and bands). strategy_state is display only."""
     s = control.read_status()
     s["control"] = control.read_control()
     try:

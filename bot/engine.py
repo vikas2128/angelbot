@@ -309,7 +309,18 @@ class Engine:
                      "last_tick_at": self.feed.last_tick_at.isoformat() if getattr(self.feed, "last_tick_at", None) else None,
                      "restarts": getattr(self.feed, "restarts", 0)},
             "recent_signals": list(self.recent_signals),
+            "strategy_state": self._strategy_state(),
         })
+
+    def _strategy_state(self) -> dict:
+        """What each instrument's strategy sees right now (display only; a failure here never stops the bot)."""
+        out = {}
+        for sym, strat in self.strategies.items():
+            try:
+                out[sym] = strat.state(self.bars_today.get(sym) or [], self.ltp.get(sym))
+            except Exception as e:
+                out[sym] = {"error": str(e)}
+        return out
 
     def _send_daily_summary(self) -> None:
         """End-of-run Telegram card built from today's closed trades (message only)."""

@@ -39,3 +39,15 @@ class VwapReversion(Strategy):
             if side < 0 and px <= v:
                 return 0
         return None
+
+    def state(self, bars: list[Bar], ltp: float | None = None) -> dict:
+        """Today's VWAP, how far the price is from it, and the buy/sell levels."""
+        out = super().state(bars, ltp)
+        v = vwap(bars) if bars else None
+        if not v:
+            return out
+        band = float(self.p["band_pct"]) / 100
+        ref = ltp or bars[-1].close
+        out.update(vwap=round(v, 2), dev_pct=round((ref - v) / v * 100, 3),
+                   buy_below=round(v * (1 - band), 2), sell_above=round(v * (1 + band), 2))
+        return out

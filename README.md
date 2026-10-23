@@ -227,7 +227,7 @@ rejected orders, feed lost and back, loss cooldown, end-of-day summary. Commands
 
 | Command / button | What it does |
 |---|---|
-| `/status` · 📊 Status | running or not, today's result, open position |
+| `/status` · 📊 Status | running or not, today's result, open position, and what the strategy sees per stock (ema_cross: both averages and the 1-minute close that would give the next signal; orb: range and break levels; vwap_revert: VWAP and bands) |
 | `/pnl` (`/summary`) · 💰 Today | today's trades and result |
 | `/pause` · `/resume` | stop / allow new entries |
 | `/kill` · 🛑 Emergency stop | close everything and stop; asks for confirmation, valid for 60 seconds |

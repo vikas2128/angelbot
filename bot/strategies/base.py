@@ -27,5 +27,10 @@ class Strategy:
     def on_bar(self, bars: list[Bar], side: int) -> Optional[int]:
         raise NotImplementedError
 
+    def state(self, bars: list[Bar], ltp: float | None = None) -> dict:
+        """What the strategy currently sees, for status displays only (never used for decisions).
+        Subclasses add their own numbers; `bars` and `needed` tell whether it has warmed up."""
+        return {"bars": len(bars), "needed": int(self.warmup_bars)}
+
     def describe(self) -> str:
         return f"{self.name}({', '.join(f'{k}={v}' for k, v in self.p.items())})"

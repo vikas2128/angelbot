@@ -259,11 +259,49 @@ def status_card(s: dict, control: dict, configured_mode: str | None = None) -> s
     feed = s.get("feed") or {}
     if alive and not s.get("replay") and feed.get("connected") is False:
         lines.append("⚠️ Price feed is disconnected")
+    for sym, st in (s.get("strategy_state") or {}).items():
+        lines += strategy_state_lines(sym, st, s.get("strategy"))
     if control.get("paused"):
         lines.append("⏸ New entries are paused")
     if control.get("kill"):
         lines.append("⛔ Emergency stop is set")
     return "\n".join(lines)
+
+
+def _signed_pct(x) -> str:
+    return f"{'+' if x > 0 else '−' if x < 0 else ''}{abs(x):.2f}%"
+
+
+def strategy_state_lines(sym: str, st: dict, strategy: str | None = None) -> list[str]:
+    """What the strategy sees for one stock, in plain words (from status.json strategy_state)."""
+    name = str(strategy or "").split("(")[0]
+    head = f"🔍 <b>{esc(sym)}</b>"
+    if st.get("error"):
+        return [f"{head}: strategy state unavailable"]
+    bars, needed = int(st.get("bars") or 0), int(st.get("needed") or 0)
+    if needed and bars < needed:
+        return [f"{head}: warming up, {bars} of {needed} one-minute bars"]
+    if "fast_ema" in st:                                           # ema_cross
+        rel = "above" if st.get("fast_above") else "below"
+        lines = [f"{head} · {bars} bars · fast avg {price(st['fast_ema'])} {rel} slow avg {price(st['slow_ema'])} "
+                 f"({_signed_pct(st.get('gap_pct') or 0)})"]
+        move = st.get("cross_move_pct")
+        what = "Buy signal" if st.get("next_signal") == "buy" else "Sell/exit signal"
+        side = "above" if st.get("next_signal") == "buy" else "below"
+        if move is not None:
+            lines.append(f"   {what} if a minute closes {side} {price(st['cross_price'])} ({_signed_pct(move)} from now)")
+        return lines
+    if "range_high" in st:                                         # orb
+        if not st.get("range_done"):
+            return [f"{head}: building the opening range ({price(st['range_low'])} to {price(st['range_high'])} so far)"]
+        done = st.get("fired") or []
+        parts = [f"buy above {price(st['buy_above'])}" if 1 not in done else "buy already taken today",
+                 f"sell below {price(st['sell_below'])}" if -1 not in done else "sell already taken today"]
+        return [f"{head} · opening range {price(st['range_low'])} to {price(st['range_high'])}", "   " + " · ".join(parts)]
+    if "vwap" in st:                                               # vwap_revert
+        return [f"{head} · {bars} bars · VWAP {price(st['vwap'])}, price {_signed_pct(st.get('dev_pct') or 0)} from it",
+                f"   buy below {price(st['buy_below'])} · sell above {price(st['sell_above'])}"]
+    return [f"{head} · {bars} bars ({esc(name)})"]
 
 
 # ───────────────────────────── morning stock selection ─────────────────────────────
