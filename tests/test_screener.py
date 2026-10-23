@@ -85,6 +85,32 @@ def test_params_from_config_overrides_defaults_only_for_known_keys():
     assert DEFAULTS["top_n"] == 3 and DEFAULTS["weights"]["gap"] == 0.25      # defaults untouched
 
 
+def test_size_follows_selection_and_the_order_cap_from_config():
+    cfg = {"selection": {"mode": "auto", "qty": 5}, "risk": {"max_order_value": 50000}}
+    p = params_from(cfg)
+    assert p["qty"] == 5 and p["max_order_value"] == 50000
+    assert params_from({**cfg, "selection": {"mode": "off", "qty": 5}})["qty"] == 0            # selection off: order_value sizing
+    by_value = params_from({**cfg, "selection": {"mode": "auto", "qty": 5, "order_value": 20000}})
+    assert by_value["qty"] == 0 and by_value["order_value"] == 20000
+    assert params_from({**cfg, "screener": {"qty": 2}})["qty"] == 2                            # an explicit screener key wins
+
+
+def test_fixed_qty_sets_fees_and_the_cap_gate_leaves_out_expensive_stocks():
+    p = params_from({"selection": {"mode": "auto", "qty": 5}, "risk": {"max_order_value": 50000}})
+    cheap = metrics(raw("CHEAP"), p, CHARGES)                                   # 5 x 1000 = 5,000
+    assert cheap["suggested_qty"] == 5 and cheap["order_value"] == 5000
+    big = metrics(raw("BIG", ltp=40000.0), DEFAULTS, CHARGES)                  # ₹40k sizing: brokerage hits the ₹20 cap
+    assert cheap["round_trip_cost_pct"] > metrics(raw("X"), DEFAULTS, CHARGES)["round_trip_cost_pct"] > 0
+    assert gates(cheap, p) == []
+    pricey = metrics(raw("PRICEY", ltp=12500.0, bid=12499.0, ask=12501.0, daily=daily(close=12500.0)), p, CHARGES)
+    assert gates(pricey, p) == ["5 shares cost ₹62,500, above the ₹50,000 order cap"]
+    assert big["suggested_qty"] == 1 and not any("order cap" in g for g in gates(big, DEFAULTS))   # no cap set: no gate
+    snap = rank([raw("CHEAP"), raw("PRICEY", ltp=12500.0, bid=12499.0, ask=12501.0, daily=daily(close=12500.0))], p, CHARGES, NOW)
+    assert snap["picks"] == ["CHEAP"]
+    page = render_html(snap)
+    assert "5 shares per order" in page and "₹50,000 order cap" in page and "₹5,000" in page
+
+
 # ---------------------------------------------------------------- data collection and report
 from bot.models import Instrument
 from bot.screen_data import collect

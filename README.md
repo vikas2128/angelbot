@@ -232,7 +232,9 @@ asked). It reads market data only (daily candles and one batched quote call) and
 selection is on (§6), the bot still trades only the instruments in the config.
 
 - **Gates** (a stock failing any is left out, with the reason): average traded value ≥ ₹100 cr, bid-ask spread ≤ 0.10%,
-  daily range ≥ 5× round-trip fees at the planned order size, at least 10 days of history.
+  daily range ≥ 5× round-trip fees at the planned order size, one order within `risk.max_order_value`, at least 10
+  days of history. With selection on, the order size is the bot's real one (`selection.qty`, e.g. 5 shares, or
+  `selection.order_value`); otherwise about ₹40,000.
 - **Score** (0 to 100) among the stocks that pass: room to move versus fees, today's gap, how much of a normal day's
   volume has traded so far, and liquidity. A missing factor is left out, never guessed.
 - The ranking is a heuristic and has **not been backtested**. Use it to shortlist stocks to test, not as a signal.

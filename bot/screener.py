@@ -22,6 +22,8 @@ DEFAULT_UNIVERSE = [
 
 DEFAULTS = {
     "order_value": 40000,          # planned ₹ per order: fees as a share of the order depend on this
+    "qty": 0,                      # fixed shares per order (the bot's real size); 0 = size by order_value
+    "max_order_value": 0,          # gate: one order (qty x price) above this ₹ is refused by the bot; 0 = no gate
     "min_traded_value_cr": 100.0,  # gate: average daily traded value, ₹ crore
     "max_spread_pct": 0.10,        # gate: best bid-ask spread, % of price (only if the quote has depth)
     "min_range_to_cost": 5.0,      # gate: average daily range must be at least this many times round-trip costs
@@ -34,9 +36,22 @@ DEFAULTS = {
 
 
 def params_from(cfg: dict | None) -> dict:
-    """Defaults, overridden by an optional `screener:` section of config.yaml."""
+    """Defaults, then the bot's real order size and cap from config.yaml, then an optional `screener:` section.
+
+    The order size follows `selection:` when selection is on (its qty, or its order_value if > 0), so the fee gate and
+    the order-cap gate judge each stock at the size the bot will actually trade. The cap is `risk.max_order_value`.
+    """
+    cfg = cfg or {}
     p = {**DEFAULTS, "weights": dict(DEFAULTS["weights"])}
-    over = dict((cfg or {}).get("screener") or {})
+    sel = cfg.get("selection") or {}
+    if sel.get("mode", "off") != "off":
+        if float(sel.get("order_value") or 0) > 0:
+            p.update(order_value=float(sel["order_value"]), qty=0)
+        else:
+            p["qty"] = int(sel.get("qty") or 1)
+    if (cfg.get("risk") or {}).get("max_order_value"):
+        p["max_order_value"] = float(cfg["risk"]["max_order_value"])
+    over = dict(cfg.get("screener") or {})
     w = over.pop("weights", None)
     p.update({k: v for k, v in over.items() if k in DEFAULTS and k != "weights"})
     if w:
@@ -86,13 +101,14 @@ def metrics(raw: dict, p: dict, charges_cfg: dict) -> dict:
     vol = raw.get("volume")
     m["vol_pct_of_avg"] = round(float(vol) / avg_vol * 100, 1) if vol is not None and avg_vol > 0 else None
     if ltp > 0:
-        qty = max(1, int(float(p["order_value"]) // ltp))
+        qty = int(p.get("qty") or 0) or max(1, int(float(p["order_value"]) // ltp))
         cost = order_charges("BUY", qty, ltp, charges_cfg) + order_charges("SELL", qty, ltp, charges_cfg)
         m["suggested_qty"] = qty
+        m["order_value"] = round(qty * ltp, 2)
         m["round_trip_cost_pct"] = round(cost / (qty * ltp) * 100, 3)
         m["range_to_cost"] = round(m["range_pct"] / m["round_trip_cost_pct"], 1) if m["range_pct"] else None
     else:
-        m.update(suggested_qty=None, round_trip_cost_pct=None, range_to_cost=None)
+        m.update(suggested_qty=None, order_value=None, round_trip_cost_pct=None, range_to_cost=None)
     return m
 
 
@@ -104,6 +120,10 @@ def gates(m: dict, p: dict) -> list[str]:
         return out
     if m["ltp"] is None:
         out.append("no price")
+    cap = float(p.get("max_order_value") or 0)
+    if cap > 0 and m.get("order_value") and m["order_value"] > cap:
+        n = m["suggested_qty"]
+        out.append(f"{n} share{'s' if n != 1 else ''} cost ₹{m['order_value']:,.0f}, above the ₹{cap:,.0f} order cap")
     if m["traded_value_cr"] is not None and m["traded_value_cr"] < float(p["min_traded_value_cr"]):
         out.append(f"traded value ₹{m['traded_value_cr']:.0f} cr/day is below ₹{float(p['min_traded_value_cr']):.0f} cr")
     if m["spread_pct"] is not None and m["spread_pct"] > float(p["max_spread_pct"]):

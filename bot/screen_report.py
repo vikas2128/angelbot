@@ -100,12 +100,15 @@ def how_it_works(p: dict) -> list[str]:
     w = p["weights"]
     tot = sum(float(v) for v in w.values()) or 1.0
     share = lambda k: f"{float(w[k]) / tot * 100:.0f}%"
+    qty, cap = int(p.get("qty") or 0), float(p.get("max_order_value") or 0)
+    size = f"{qty} share{'s' if qty != 1 else ''} per order, the bot's order size" if qty else \
+        f"an order of about ₹{float(p['order_value']):,.0f}"
+    cap_gate = f", {'the order' if qty else 'one order'} costing at most the ₹{cap:,.0f} order cap" if cap else ""
     return [
         f"A stock is only scored if it passes the gates: at least ₹{float(p['min_traded_value_cr']):.0f} crore traded "
         f"per day on average, a spread of at most {float(p['max_spread_pct']):.2f}% of the price, an average daily range "
-        f"at least {float(p['min_range_to_cost']):.0f} times the round-trip fees, and {p['min_history_days']} days of history.",
-        f"Fees are worked out for an order of about ₹{float(p['order_value']):,.0f}, since fees as a share of the order "
-        "depend on its size.",
+        f"at least {float(p['min_range_to_cost']):.0f} times the round-trip fees{cap_gate}, and {p['min_history_days']} days of history.",
+        f"Fees are worked out for {size}, since fees as a share of the order depend on its size.",
         f"The score (0 to 100) ranks each stock against the others on room to move versus fees ({share('range_to_cost')}), "
         f"the size of today's gap ({share('gap')}), how much of a normal day's volume has traded so far ({share('volume')}) "
         f"and liquidity ({share('liquidity')}). A factor with no data is left out for that stock, not guessed.",
@@ -118,13 +121,20 @@ def render_html(snap: dict) -> str:
     ok = [r for r in snap["rows"] if not r["excluded"]]
     bad = [r for r in snap["rows"] if r["excluded"]]
     picks = ok[: int(p["top_n"])]
+
+    def size_chip(r):
+        if p.get("qty"):                            # fixed shares: show what one order costs
+            v = r.get("order_value")
+            return f'<span>{r["suggested_qty"]} shares<b>{esc(DASH if v is None else f"₹{v:,.0f}")}</b></span>'
+        return f'<span>Qty for ₹{float(p["order_value"]):,.0f}<b>{esc(_num(r["suggested_qty"]))}</b></span>'
+
     cards = "".join(
         f'<div class="card pick"><div class="rk">#{r["rank"]}</div><div class="sym">{esc(_name(r["symbol"]))}{_tags(r)}</div>'
         f'<div class="sc"><b>{r["score"]:.0f}</b> / 100</div><div class="bar"><div style="width:{r["score"]:.0f}%"></div></div>'
         f'<ul>{"".join("<li>" + esc(w) + "</li>" for w in r["why"])}</ul>'
         f'<div class="chips"><span>Price<b>{esc(_num(r["ltp"], ""))}</b></span><span>Gap<b>{esc(_gap(r["gap_pct"]))}</b></span>'
         f'<span>Room vs fees<b>{esc(_num(r["range_to_cost"], "x"))}</b></span><span>Spread<b>{esc(_pct(r["spread_pct"], 2))}</b></span>'
-        f'<span>Qty for ₹{float(p["order_value"]):,.0f}<b>{esc(_num(r["suggested_qty"]))}</b></span>'
+        f'{size_chip(r)}'
         f'<span>Traded/day<b>{esc(_num(r["traded_value_cr"], " cr"))}</b></span></div></div>' for r in picks)
     if not picks:
         cards = '<div class="card"><h2>No stock passed the gates today</h2><p class="note">See the excluded list below for why.</p></div>'
