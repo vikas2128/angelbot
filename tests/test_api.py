@@ -60,20 +60,20 @@ def test_every_api_route_needs_a_session(client):
     assert client.get("/healthz").json() == {"ok": True}
 
 
-def test_read_only_and_no_order_or_live_routes(client):
-    """Data routes are GET-only; the only POSTs are login steps and device removal. Nothing can trade, switch mode
-    or touch secrets."""
+def test_route_inventory_no_order_or_live_routes(client):
+    """Exactly these routes exist. Data routes are GET-only; actions are the Telegram ones. Nothing can place orders,
+    switch paper/live or touch secrets."""
     app = API.create_app(AA.AuthStore(RP, ORIGIN, folder=None, notify_fn=lambda t: None))
     paths = {r.path for r in app.routes}
-    assert {p for p in paths if p.startswith("/api/")} == {"/api/status", "/api/trades", "/api/settings", "/api/alerts",
-                                                           "/api/report", "/api/screener"}
-    assert {p for p in paths if p.startswith("/auth/")} == {
-        "/auth/me", "/auth/register/options", "/auth/register/verify", "/auth/login/options", "/auth/login/verify",
-        "/auth/stepup/options", "/auth/stepup/verify", "/auth/logout", "/auth/devices", "/auth/devices/remove"}
-    assert paths - {p for p in paths if p.startswith(("/api/", "/auth/"))} == {"/healthz", "/ws"}
-    for word in ("order", "buy", "sell", "live", "mode", "env", "profile", "broker"):
+    data = {"/api/status", "/api/trades", "/api/settings", "/api/alerts", "/api/report", "/api/screener"}
+    actions = {"/api/control/pause", "/api/control/resume", "/api/control/kill/ask", "/api/control/kill/confirm",
+               "/api/control/restart", "/api/settings/set", "/api/settings/reset"}
+    auth = {"/auth/me", "/auth/register/options", "/auth/register/verify", "/auth/login/options", "/auth/login/verify",
+            "/auth/stepup/options", "/auth/stepup/verify", "/auth/logout", "/auth/devices", "/auth/devices/remove"}
+    assert paths == data | actions | auth | {"/healthz", "/ws"}
+    for word in ("order", "buy", "sell", "live", "mode", "env", "profile", "broker", "shell", "exec", "sql", "file"):
         assert not any(word in p for p in paths), word
-    for path in (p for p in paths if p.startswith("/api/")):
+    for path in data:
         for method in ("post", "put", "patch", "delete"):
             assert getattr(client, method)(path, headers=H).status_code == 405, (method, path)
 

@@ -1,6 +1,7 @@
 # Build plan: AngelBot app (installable web app + private API over Tailscale)
 
-Status: **phases 0 to 3 built** (shared actions, alert outbox, read-only API, passkey login); phases 4 to 7 not built.
+Status: **phases 0 to 4 built** (shared actions, alert outbox, read-only API, passkey login, actions); phases 5 to 7
+not built.
 The API is not installed as a service yet. Telegram stays on as the backup alert and control channel.
 
 Built so far:
@@ -15,6 +16,11 @@ Built so far:
   `X-Requested-With: angelbot` header, a JSON object body under 64 KB with only the expected fields; audit log in
   `runtime/paper/app/audit.jsonl`; Telegram alerts for a new enrolment code, a new or removed device, a lockout and
   "sign out everywhere". `app devices`, `app remove --id`, `app signout-all` on the VM.
+- Actions (phase 4), all through `bot/actions.py`, each needing a passkey check from the last 2 minutes, at most 10 a
+  minute per device (refused attempts count too), and audited: `POST /api/control/pause`, `/resume`,
+  `/kill/ask` then `/kill/confirm` with the returned token within 60 seconds (one try), `/restart` (paper only, the same
+  refusals as Telegram), `/api/settings/set` (`{"id", "choice"}` or `{"id", "amount"}`) and `/api/settings/reset`.
+  Telegram is told about an emergency stop or a restart from the app.
 - Tests use a software passkey that signs real WebAuthn responses, so the library's verification runs in full.
 
 ## 1. Goal

@@ -1,9 +1,12 @@
-"""The app's API (phases 2-3: read-only data, plus passkey login). Serves status, trades, report, screener, settings and alerts for the PAPER area,
+"""The app's API: read-only data, passkey login, and the same few actions Telegram has (phases 2-4). Serves status, trades, report, screener, settings and alerts for the PAPER area,
 plus a WebSocket with live status. See docs/APP_PLAN.md.
 
 Safety, by construction:
-  * GET only: there is no route that changes anything, and none that places, modifies or cancels orders, switches
-    paper/live, or reads .env, profiles or broker credentials. The API never logs in to the broker.
+  * Data routes are GET only. The only changes are the ones Telegram can make, through bot/actions.py: pause,
+    resume, emergency stop (asked, then confirmed within a minute), restarting the paper bot (same safety checks)
+    and settings (same fixed choices and validation). Each needs a passkey check from the last 2 minutes, and at
+    most 10 a minute per device. There is no route that places, modifies or cancels orders, switches paper/live,
+    or reads .env, profiles or broker credentials. The API never logs in to the broker.
   * Area-locked: it refuses to run for any area but paper, and reads only that area's runtime folder.
   * Network-locked: it binds only to a Tailscale address (100.64.0.0/10 or fd7a:115c:a1e0::/48) with HTTPS, or, with
     --dev, to 127.0.0.1 for local testing. It never binds to 0.0.0.0.
@@ -18,7 +21,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
+import hmac
 import json
+import secrets
+import subprocess
 import ipaddress
 import logging
 import os
@@ -34,16 +41,19 @@ from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from bot import actions as A
 from bot import alerts, control
 from bot import config as C
 from bot import settings as ST
-from bot.api_auth import COOKIE, SESSION_TTL, AuthError, AuthStore
+from bot.api_auth import COOKIE, SESSION_TTL, AuthError, AuthStore, _esc
 from bot.journal import query_readonly
 from bot.timeutil import now_ist
 
 log = logging.getLogger("angelbot.api")
 
 READS_PER_MIN = 30
+ACTIONS_PER_MIN = 10
+KILL_CONFIRM_SEC = 60
 WS_PUSH_SEC = 2.0
 TAILSCALE_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -147,10 +157,12 @@ MAX_BODY = 64 * 1024
 CSRF_HEADER = ("x-requested-with", "angelbot")
 
 
-def create_app(store: AuthStore, tls: bool = True) -> Starlette:
-    """`store` holds devices and sessions (bot.api_auth). Reads need a session; changes need a session, the right
-    Origin, the X-Requested-With header (CSRF) and, from phase 4, a fresh step-up."""
+def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run) -> Starlette:
+    """`store` holds devices and sessions (bot.api_auth). Reads need a session; actions need a session, the right
+    Origin, the X-Requested-With header (CSRF) and a fresh step-up (a passkey check from the last 2 minutes)."""
     hits: dict[str, deque] = defaultdict(deque)
+    acts: dict[str, deque] = defaultdict(deque)
+    kill_asks: dict[str, tuple[str, float]] = {}       # session hash -> (confirmation token, expiry)
 
     def ip_of(request) -> str:
         return request.client.host if request.client else "?"
@@ -160,6 +172,15 @@ def create_app(store: AuthStore, tls: bool = True) -> Starlette:
         while q and now - q[0] > 60:
             q.popleft()
         if len(q) >= READS_PER_MIN:
+            return False
+        q.append(now)
+        return True
+
+    def action_ok(who: str) -> bool:
+        q, now = acts[who], time.monotonic()
+        while q and now - q[0] > 60:
+            q.popleft()
+        if len(q) >= ACTIONS_PER_MIN:
             return False
         q.append(now)
         return True
@@ -300,6 +321,75 @@ def create_app(store: AuthStore, tls: bool = True) -> Starlette:
         resp.delete_cookie(COOKIE, path="/")
         return resp
 
+    # ---- actions (phase 4): every one needs a session and a fresh step-up; all go through bot/actions.py
+    def who(token) -> str:
+        s = store.session(token)
+        return s["name"] if s else "?"
+
+    def act(fn):
+        """Per-device action limit, then the action, then an audit record. `fn(data, ip, token, device)`."""
+        def run(data, ip, token):
+            device = who(token)
+            if not action_ok(device):
+                raise AuthError("too many actions, try again in a minute", 429)
+            return fn(data, ip, token, device)
+        return run
+
+    def pause(_d, ip, _t, device):
+        c = A.pause(f"app: {device}")
+        store.audit("action_pause", ip=ip, device=device)
+        return JSONResponse({"done": True, "control": c})
+
+    def resume(_d, ip, _t, device):
+        c = A.resume(f"app: {device}")
+        store.audit("action_resume", ip=ip, device=device)
+        return JSONResponse({"done": True, "control": c})
+
+    def kill_ask(_d, ip, token, device):
+        confirm = secrets.token_urlsafe(16)
+        kill_asks[hashlib.sha256(token.encode()).hexdigest()] = (confirm, time.monotonic() + KILL_CONFIRM_SEC)
+        store.audit("action_kill_asked", ip=ip, device=device)
+        return JSONResponse({"confirm": confirm, "expires_in": KILL_CONFIRM_SEC,
+                             "warning": "This cancels waiting entries, closes ALL positions and stops the bot."})
+
+    def kill_confirm(data, ip, token, device):
+        key = hashlib.sha256(token.encode()).hexdigest()
+        want, until = kill_asks.pop(key, ("", 0.0))
+        if not want or time.monotonic() > until or not hmac.compare_digest(str(data.get("confirm", "")), want):
+            raise AuthError("that confirmation expired or does not match: ask again", 409)
+        c = A.kill(f"app: {device}")
+        store.audit("action_kill", ip=ip, device=device)
+        store.notify(f"⛔ <b>Emergency stop from the app</b> by “{_esc(device)}”. The bot closes positions and stops "
+                     "(left paused). Check /status and the Angel One app.")
+        return JSONResponse({"done": True, "control": c})
+
+    def restart(_d, ip, _t, device):
+        ok, why = A.restart(f"app: {device}", runner=restart_runner)
+        store.audit("action_restart", ip=ip, device=device, ok=ok, detail=why)
+        if not ok:
+            raise AuthError(why or "restart failed", 409)
+        store.notify(f"🔄 <b>Paper bot restart from the app</b> by “{_esc(device)}”.")
+        return JSONResponse({"done": True})
+
+    def set_setting(data, ip, _t, device):
+        sid = str(data.get("id", ""))
+        if ("choice" in data) == ("amount" in data):
+            raise BadRequest("send exactly one of choice or amount")
+        if "choice" in data:
+            if not isinstance(data["choice"], int) or isinstance(data["choice"], bool):
+                raise BadRequest("choice must be a whole number")
+            old, new = A.set_setting(sid, index=data["choice"])
+        else:
+            old, new = A.set_setting(sid, value=data["amount"])
+        store.audit("action_setting", ip=ip, device=device, setting=sid, old=old, new=new)
+        return JSONResponse({"done": True, "id": sid, "old": old, "new": new,
+                             "note": "applies from the next start; not backtested"})
+
+    def reset_settings(_d, ip, _t, device):
+        n = A.reset_settings()
+        store.audit("action_settings_reset", ip=ip, device=device, count=n)
+        return JSONResponse({"done": True, "reset": n})
+
     def remove_device(data, ip, token):
         s = store.session(token)
         name = store.remove_device(str(data.get("id", "")), by=f"app: {s['name']}" if s else "app", ip=ip)
@@ -340,6 +430,13 @@ def create_app(store: AuthStore, tls: bool = True) -> Starlette:
               Route("/api/status", endpoint(status)), Route("/api/trades", endpoint(trades)),
               Route("/api/settings", endpoint(settings)), Route("/api/alerts", endpoint(alerts_)),
               Route("/api/report", endpoint(report)), Route("/api/screener", endpoint(screener)),
+              *[Route(path, auth_post(act(fn), need_session=True, need_stepup=True, allowed=allowed), methods=["POST"])
+                for path, fn, allowed in (
+                    ("/api/control/pause", pause, ()), ("/api/control/resume", resume, ()),
+                    ("/api/control/kill/ask", kill_ask, ()), ("/api/control/kill/confirm", kill_confirm, ("confirm",)),
+                    ("/api/control/restart", restart, ()),
+                    ("/api/settings/set", set_setting, ("id", "choice", "amount")),
+                    ("/api/settings/reset", reset_settings, ()))],
               WebSocketRoute("/ws", ws)]
     return Starlette(routes=routes)
 
