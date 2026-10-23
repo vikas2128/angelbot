@@ -50,6 +50,7 @@ def params_from(cfg: dict | None) -> dict:
     p = {**DEFAULTS, "weights": dict(DEFAULTS["weights"])}
     sel = cfg.get("selection") or {}
     if sel.get("mode", "off") != "off":
+        p["top_n"] = int(sel.get("top_n") or 1)    # show as picks exactly the stocks the bot will trade
         if float(sel.get("order_value") or 0) > 0:
             p.update(order_value=float(sel["order_value"]), qty=0)
         else:

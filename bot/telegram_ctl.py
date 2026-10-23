@@ -189,8 +189,9 @@ def build_screen_file(out_dir: Path) -> tuple[Path, str]:
         raise ValueError("No screener snapshot yet. On the VM, before 09:00 or after the session, run "
                          f"./deploy/ab {os.environ.get('ANGELBOT_PROFILE') or 'paper'} screen")
     path = out_dir / f"angelbot-screener-{snap.get('market_date', 'latest')}.html"
-    path.write_text(SR.render_html(snap))
-    return path, SR.summary_html(snap, now_ist().strftime("%Y-%m-%d"))
+    decision = control.read_json(control.SEL_STATE)              # what the bot decided this morning, if anything
+    path.write_text(SR.render_html(snap, decision))
+    return path, SR.summary_html(snap, now_ist().strftime("%Y-%m-%d"), decision)
 
 
 def apply_choice(arg: str, today: str) -> str:

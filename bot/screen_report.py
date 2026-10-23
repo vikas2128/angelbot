@@ -21,6 +21,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-app
 h1{font:400 28px/1.15 Georgia,"Iowan Old Style",serif;margin:0 0 4px}h2{font-size:15px;font-weight:600;margin:0}
 .sub,.note{color:var(--muted);font-size:13px;margin:0}
 .banner{display:flex;gap:10px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--muted);font-size:13px}
+.banner.decided{color:var(--fg);border-left:3px solid var(--accent)}
 .banner i{flex:none;width:8px;height:8px;border-radius:50%;background:var(--warn);margin-top:6px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
 .picks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px}
@@ -134,10 +135,26 @@ def how_it_works(p: dict) -> list[str]:
           "filter on a few weeks of history, not proof a stock will make money."] if p.get("strategy_per_stock") else []) + \
         ([f"Backtest check: each stock was backtested the evening before with today's strategy and order size; a stock "
           f"whose backtest lost money after fees, or made fewer than {p['bt_min_trades']} trades, is left out. "
-          "A few weeks of history is a coarse filter, not proof the stock will make money."] if p.get("backtest_gate") else [])
+          "A few weeks of history is a coarse filter, not proof the stock will make money."]
+         if p.get("backtest_gate") and not p.get("strategy_per_stock") else [])
 
 
-def render_html(snap: dict) -> str:
+def decision_text(snap: dict, decision: dict | None) -> str | None:
+    """What the bot decided this morning, if the decision is for this snapshot's day."""
+    d = decision or {}
+    if not d or d.get("market_date") != snap.get("market_date"):
+        return None
+    when = str(d.get("decided_at", ""))[11:16]
+    syms = d.get("symbols") or []
+    if not syms:
+        return f"No trading today (decided {when}): {d.get('note') or 'no stock passed the checks'}."
+    per = d.get("strategies") or {}
+    names = ", ".join(f"{_name(s)} ({per[s]})" if per.get(s) else _name(s) for s in syms)
+    who = {"auto": "top picks", "you": "your choice", "timeout": "no tap", "config": "your configured list"}.get(d.get("source"), d.get("source") or "")
+    return f"Trading today (decided {when}, {who}): {names}."
+
+
+def render_html(snap: dict, decision: dict | None = None) -> str:
     p = snap["params"]
     ok = [r for r in snap["rows"] if not r["excluded"]]
     bad = [r for r in snap["rows"] if r["excluded"]]
@@ -198,7 +215,9 @@ def render_html(snap: dict) -> str:
         items = "".join(f"<li><b>{esc(_name(r['symbol']))}</b>{_tags(r)}: {esc('; '.join(r['excluded']))}</li>" for r in bad)
         tabs.append(("out", f"Left out ({len(bad)})", "These failed a gate, so they are not scored", f'<ul class="plain">{items}</ul>'))
     sc = snap.get("strategy_compare")
-    if sc and sc.get("totals"):
+    if sc and sc.get("per_stock") and sc.get("walk"):
+        tabs.append(("strat", "Strategy check", walk_note(sc), walk_tables(sc)))
+    elif sc and sc.get("totals"):
         tabs.append(("strat", "Strategies", strategy_note(sc), strategy_tables(sc)))
     tab_css = "".join(
         f"#st-{k}:checked~.tabs label[for=st-{k}]{{color:var(--fg);border-bottom-color:var(--accent)}}"
@@ -216,15 +235,56 @@ def render_html(snap: dict) -> str:
     how = ('<section class="card"><h2>How the score works</h2><ul class="plain">'
            + "".join(f"<li>{esc(t)}</li>" for t in how_it_works(p)) + "</ul></section>")
     gen = str(snap.get("generated_at", ""))
+    decided = decision_text(snap, decision)
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
             f'<title>AngelBot screener {esc(snap.get("market_date", ""))}</title><style>{CSS}{tab_css}</style></head><body><div class="wrap">'
             f'<header><h1>Stock screener</h1><p class="sub">{esc(date_label(snap))} · checked {snap["universe"]} stocks · '
             f'{snap["eligible"]} passed the gates · built {esc(gen[11:16])} IST</p>'
             f'<p class="sub">Screened: {esc(lists_text(snap))}</p></header>'
-            '<div class="banner"><i></i><span>Advisory only: the screener places no orders. With morning selection on, the bot '
-            'trades the top pick that passed the gates; otherwise just the stocks in its config. The score is a heuristic that has not been backtested: use it to shortlist stocks to test, not as a signal.</span></div>'
+            + (f'<div class="banner decided"><i></i><span><b>{esc(decided)}</b></span></div>' if decided else "") +
+            f'<div class="banner"><i></i><span>The screener places no orders. With morning selection on, the bot trades the '
+            f'top {int(p["top_n"])} that passed the checks; the score only orders them and has not been backtested itself.</span></div>'
             f'<section><div class="picks">{cards}</div></section>{tabs_html}{errs}{how}'
             '<footer>Read-only analytics from market data. No orders are placed by the screener.</footer></div></body></html>')
+
+
+def walk_note(sc: dict) -> str:
+    when = str(sc.get("run_at", ""))[:16].replace("T", " ")
+    note = (f"The check the bot uses (run {when} IST): each strategy on each stock, on the older two-thirds of the last "
+            f"{sc.get('days')} days and, separately, on the newer third. A stock's strategy is the best on the older days, "
+            "kept only if it also made money on the newer days. Stocks marked none are left out.")
+    if sc.get("note"):
+        note += f" Note: {sc['note']}."
+    return note
+
+
+def walk_tables(sc: dict) -> str:
+    walk, choices = sc.get("walk") or {}, sc.get("choices") or {}
+    passed = sorted(s for s, c in choices.items() if (c or {}).get("strategy"))
+    names = sorted({n for w in walk.values() for n in w})
+    tot = ""
+    for n in names:                                # per strategy, over all stocks
+        older = sum(float(((w.get(n) or {}).get("train") or {}).get("net_pnl") or 0) for w in walk.values())
+        newer = sum(float(((w.get(n) or {}).get("test") or {}).get("net_pnl") or 0) for w in walk.values())
+        chosen = sum(1 for c in choices.values() if (c or {}).get("strategy") == n)
+        tot += (f'<tr><td>{esc(n)}</td><td class="r {"up" if older > 0 else "dn" if older < 0 else ""}">{esc(_money(older))}</td>'
+                f'<td class="r {"up" if newer > 0 else "dn" if newer < 0 else ""}">{esc(_money(newer))}</td><td class="r">{chosen}</td></tr>')
+    order = sorted(walk, key=lambda s: (not (choices.get(s) or {}).get("strategy"), s))
+    items = ""
+    for sym in order:
+        c = choices.get(sym) or {}
+        head = (f'<b>{esc(_name(sym))}</b> → <b class="up">{esc(c["strategy"])}</b>' if c.get("strategy")
+                else f'<b>{esc(_name(sym))}</b> → none <span class="note">({esc(c.get("why") or "not checked")})</span>')
+        parts = []
+        for n in names:
+            w = walk[sym].get(n) or {}
+            tr, te = w.get("train") or {}, w.get("test") or {}
+            parts.append(f'{esc(n)} {esc(_money(tr.get("net_pnl")))} / {esc(_money(te.get("net_pnl")))}')
+        items += f'<li>{head}<br><span class="note">older / newer: {" · ".join(parts)}</span></li>'
+    return (f'<p class="note">{len(passed)} of {len(walk)} stocks passed: {esc(", ".join(_name(s) for s in passed) or "none")}</p>'
+            '<div class="scroll"><table><thead><tr><th>Strategy</th><th class="r">Older days</th><th class="r">Newer days</th>'
+            f'<th class="r">Chosen for</th></tr></thead><tbody>{tot}</tbody></table></div>'
+            f'<ul class="plain">{items}</ul>')
 
 
 def strategy_note(sc: dict) -> str:
@@ -263,7 +323,7 @@ def strategy_tables(sc: dict) -> str:
             f'<div class="scroll"><table><thead><tr><th>Stock</th>{head}</tr></thead><tbody>{body}</tbody></table></div>')
 
 
-def summary_html(snap: dict, today: str | None = None) -> str:
+def summary_html(snap: dict, today: str | None = None, decision: dict | None = None) -> str:
     """Short Telegram message (HTML) with the top picks."""
     ok = [r for r in snap["rows"] if not r["excluded"]]
     n = int(snap["params"]["top_n"])
@@ -271,6 +331,9 @@ def summary_html(snap: dict, today: str | None = None) -> str:
     if today and snap.get("market_date") != today:
         lines.append(f"⚠️ This snapshot is from {esc(snap.get('market_date'))}, not today.")
     lines.append(f"Screened: {esc(lists_text(snap))}")
+    decided = decision_text(snap, decision)
+    if decided:
+        lines.append(f"<b>{esc(decided)}</b>")
     if not ok:
         lines.append("No stock passed the gates.")
     for r in ok[:n]:
@@ -283,7 +346,16 @@ def summary_html(snap: dict, today: str | None = None) -> str:
         lines.append(f"{r['rank']}. <b>{esc(r['symbol'])}</b>{tags} · " + " · ".join(bits))
     lines.append(f"Checked {snap['universe']} stocks, {snap['eligible']} passed the gates.")
     sc = snap.get("strategy_compare")
-    if sc and sc.get("totals"):
+    if sc and sc.get("per_stock") and sc.get("walk"):
+        ch = sc.get("choices") or {}
+        passed = sorted(s for s, c in ch.items() if (c or {}).get("strategy"))
+        when = str(sc.get("run_at", ""))[5:16].replace("T", " ")
+        listed = ", ".join(f"{_name(s)} {ch[s]['strategy']}" for s in passed)
+        lines.append(f"Strategy check (run {esc(when)}): {len(passed)} of {len(sc['walk'])} stocks passed"
+                     + (f": {esc(listed)}" if passed else "."))
+        if sc.get("note"):
+            lines.append(f"  ⚠️ {esc(sc['note'])}")
+    elif sc and sc.get("totals"):
         lines.append(f"Strategies, last {sc.get('days')} days on these stocks (information only, in use: {esc(sc['current'])}):")
         for t in sc["totals"]:
             mark = " ◀ in use" if t["strategy"] == sc["current"] else ""
@@ -291,5 +363,5 @@ def summary_html(snap: dict, today: str | None = None) -> str:
                          f"{t['win_rate_pct']:g}% wins{mark}")
         if sc.get("note"):
             lines.append(f"  ⚠️ {esc(sc['note'])}")
-    lines.append("The screener places no orders. With morning selection on, the bot trades the top pick; otherwise its config list.")
+    lines.append(f"The screener places no orders. With morning selection on, the bot trades the top {n} that passed the checks.")
     return "\n".join(lines)

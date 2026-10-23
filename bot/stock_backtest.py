@@ -67,7 +67,7 @@ def run_all(cfg: dict, broker, insts: list, now: datetime, days: int = DEFAULT_D
     all_params = cfg["strategy"].get("params") or {}
     end = now.replace(second=0, microsecond=0)
     start = (end - timedelta(days=days)).replace(hour=9, minute=15)
-    results, compare, choices, errors = {}, {}, {}, []
+    results, compare, choices, walks, errors = {}, {}, {}, {}, []
     for n, inst in enumerate(insts, 1):
         if progress:
             progress(n, len(insts), inst.symbol)
@@ -90,12 +90,13 @@ def run_all(cfg: dict, broker, insts: list, now: datetime, days: int = DEFAULT_D
             compare[inst.symbol] = per
             results[inst.symbol] = per[current]
             choices[inst.symbol] = choose(walk)
+            walks[inst.symbol] = walk
         except Exception as e:                                       # network, rate limit, bad data
             errors.append(f"{inst.symbol}: {e}")
     st = cfg["strategy"]
     return {"run_at": now.isoformat(timespec="seconds"), "days": days, "strategy": st["name"],
             "amount": float((cfg.get("sizing") or {}).get("amount") or 0), "qty": _qty(cfg),
-            "fingerprint": fingerprint(cfg), "results": results, "compare": compare, "choices": choices, "errors": errors}
+            "fingerprint": fingerprint(cfg), "results": results, "compare": compare, "choices": choices, "walk": walks, "errors": errors}
 
 
 def split_walk_forward(bars: list) -> tuple[list, list]:
@@ -200,4 +201,6 @@ def comparison(cfg: dict, now: datetime) -> dict | None:
     if snap.get("fingerprint") != fingerprint(same):
         notes.append("made before the exits, risk limits, order size or strategy parameters last changed")
     return {"run_at": snap["run_at"], "days": snap.get("days"), "current": cfg["strategy"]["name"],
-            "totals": totals(compare), "by_stock": compare, "note": "; ".join(notes)}
+            "totals": totals(compare), "by_stock": compare, "note": "; ".join(notes),
+            "walk": snap.get("walk") or {}, "choices": snap.get("choices") or {},
+            "per_stock": bool((cfg.get("screener") or {}).get("strategy_per_stock"))}

@@ -167,7 +167,7 @@ def test_report_html_shows_everything_without_javascript():
     assert "<script" not in page and "http://" not in page and "https://" not in page
     import re
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"<style.*?</style>", "", page, flags=re.S)))
-    for needle in ("Stock screener", "Thu 22 Oct", "Advisory only", "HOT", "MID", "+2.5%", "Left out", "THIN",
+    for needle in ("Stock screener", "Thu 22 Oct", "places no orders", "HOT", "MID", "+2.5%", "Left out", "THIN",
                    "traded value", "Problems collecting data", "XYZ-EQ", "How the score works", "has not been backtested"):
         assert needle in text, needle
     assert text.index("HOT") < text.index("MID")                                  # ranked order
@@ -247,3 +247,55 @@ def test_telegram_summary_names_the_lists_and_tags_the_picks():
     snap = _tagged_snap()
     snap["lists"][1]["stale"], snap["lists"][1]["age_days"] = True, 130
     assert "Bank Nifty (14, list from 22 Oct, 130 days old: refresh it)" in summary_html(snap, "2026-10-22")
+
+
+# ---------------------------------------------------------------- the page matches what the bot does
+def _sel_snap(cfg_extra=None):
+    cfg = {"selection": {"mode": "auto", "top_n": 5, "order_value": 40000}, "screener": {"strategy_per_stock": True}}
+    cfg.update(cfg_extra or {})
+    p = params_from(cfg)
+    rows = [raw(f"S{i}-EQ", choice={"strategy": "orb", "test": {"net_pnl": 10.0, "trades": 6}}) for i in range(7)]
+    return rank(rows, p, CHARGES, NOW), p
+
+
+def test_picks_count_follows_morning_selection():
+    snap, p = _sel_snap()
+    assert p["top_n"] == 5 and len(snap["picks"]) == 5
+    assert render_html(snap).count('class="card pick"') == 5
+    assert summary_html(snap).count("strategy orb") == 5 and "top 5 that passed" in summary_html(snap)
+    assert params_from({"selection": {"mode": "off", "top_n": 5}})["top_n"] == 3          # selection off: the screener's own
+
+
+def test_only_the_check_in_use_is_explained():
+    from bot.screen_report import how_it_works
+    p = params_from({"selection": {"mode": "auto"}, "screener": {"strategy_per_stock": True, "backtest_gate": True}})
+    text = " ".join(how_it_works(p))
+    assert "Strategy per stock" in text and "Backtest check" not in text
+    p = params_from({"screener": {"strategy_per_stock": False, "backtest_gate": True}})
+    assert "Backtest check" in " ".join(how_it_works(p))
+
+
+def test_todays_decision_is_shown_only_for_that_day():
+    snap, _ = _sel_snap()
+    d = {"market_date": snap["market_date"], "symbols": ["S0-EQ", "S1-EQ"], "source": "auto",
+         "strategies": {"S0-EQ": "orb", "S1-EQ": "ema_cross"}, "decided_at": "2026-10-22T09:17:41+05:30"}
+    page, msg = render_html(snap, d), summary_html(snap, decision=d)
+    assert "Trading today (decided 09:17, top picks): S0 (orb), S1 (ema_cross)." in page
+    assert "Trading today (decided 09:17, top picks)" in msg
+    none = {**d, "symbols": [], "note": "no stock passed the screener's gates today"}
+    assert "No trading today (decided 09:17): no stock passed" in render_html(snap, none)
+    assert "Trading today" not in render_html(snap, {**d, "market_date": "2020-01-01"})          # yesterday's: not shown
+
+
+def test_strategy_check_tab_shows_the_walk_forward():
+    snap, _ = _sel_snap()
+    s = {"trades": 20, "net_pnl": 50.0}
+    snap["strategy_compare"] = {"run_at": "2026-10-21T15:47:00+05:30", "days": 30, "current": "ema_cross", "note": "",
+        "per_stock": True, "totals": [], "by_stock": {},
+        "walk": {"S0-EQ": {"orb": {"train": s, "test": {"trades": 6, "net_pnl": 12.0}}, "ema_cross": {"train": {"trades": 40, "net_pnl": -80.0}, "test": {"trades": 15, "net_pnl": -30.0}}},
+                 "S1-EQ": {"orb": {"train": {"trades": 3, "net_pnl": 5.0}, "test": {"trades": 1, "net_pnl": 1.0}}, "ema_cross": {"train": {"trades": 30, "net_pnl": -10.0}, "test": {"trades": 9, "net_pnl": -5.0}}}},
+        "choices": {"S0-EQ": {"strategy": "orb"}, "S1-EQ": {"strategy": None, "why": "no strategy made money (with enough trades) on the older days"}}}
+    page = render_html(snap)
+    assert "Strategy check" in page and "1 of 2 stocks passed: S0" in page
+    assert "S0</b> → <b class=\"up\">orb</b>" in page and "S1</b> → none" in page and "older / newer" in page
+    assert "Strategy check (run 10-21 15:47): 1 of 2 stocks passed: S0 orb" in summary_html(snap)
