@@ -273,10 +273,39 @@ def cmd_screen(args, cfg):
     print("(advisory only: the bot still trades just the instruments in config.yaml)")
 
 
+def cmd_app(args, cfg):
+    """Manage the app's devices on the VM. Enrolment codes can only be made here, never from the app."""
+    from bot.api_auth import AuthError, AuthStore
+    _no_area_guard("app")
+    if os.environ.get("ANGELBOT_PROFILE") != "paper":
+        sys.exit("the app is only for the paper area: ./deploy/ab paper app ...")
+    store = AuthStore("cli", "cli")
+    try:
+        if args.action == "enroll":
+            code = store.create_enrol_code(args.name or "")
+            print(f"enrolment code for '{args.name}': {code}")
+            print("valid for 10 minutes, one use. Open the app on that device and enter it, then confirm with Face ID.")
+        elif args.action == "devices":
+            devs = store.device_list()
+            if not devs:
+                print("no devices registered")
+            for d in devs:
+                print(f"  {d['name']:<24} id={d['id']}  added {d['created']}  last used {d['last_used'] or 'never'}")
+        elif args.action == "remove":
+            if not args.id:
+                sys.exit("give --id (see: app devices)")
+            print("removed and signed out:", store.remove_device(args.id, by="the VM"))
+        elif args.action == "signout-all":
+            print(f"signed out {store.signout_all()} session(s)")
+    except AuthError as e:
+        sys.exit(str(e))
+
+
 def cmd_api(args, cfg):
     """Run the app's API (read-only for now). Everything is checked in bot.api_server: area, address, HTTPS."""
     from bot import api_server
     argv = ["--port", str(args.port)] + (["--host", args.host] if args.host else []) + \
+        (["--name", args.name] if args.name else []) + \
         (["--cert", args.cert, "--key", args.key] if args.cert and args.key else []) + (["--dev"] if args.dev else [])
     api_server.main(argv)
 
@@ -459,9 +488,15 @@ def main(argv=None):
     sc.add_argument("--html", help="also write the standalone HTML report here")
     sc.add_argument("--force", action="store_true", help="run even while the bot is running (second login!)")
 
+    app = sub.add_parser("app", help="the app's devices: enrol, list, remove, sign out everywhere")
+    app.add_argument("action", choices=["enroll", "devices", "remove", "signout-all"])
+    app.add_argument("--name", help="device name for enroll, e.g. 'Vikas iPhone'")
+    app.add_argument("--id", help="device id for remove (from: app devices)")
+
     api = sub.add_parser("api", help="the app's read-only API (paper area, Tailscale address only)")
     api.add_argument("--host"); api.add_argument("--port", type=int, default=8443)
     api.add_argument("--cert"); api.add_argument("--key"); api.add_argument("--dev", action="store_true")
+    api.add_argument("--name", help="the VM's Tailscale HTTPS name (.ts.net)")
 
     bs = sub.add_parser("backtest-stocks")
     bs.add_argument("--universe", help="comma-separated presets or symbols (default: the screener's universe)")
@@ -485,7 +520,7 @@ def main(argv=None):
     cfg = settings.load(Path(args.config) if args.config else None)     # config.yaml + this area's Telegram settings
     handlers = {"check": cmd_check, "run": cmd_run, "fetch": cmd_fetch, "backtest": cmd_backtest,
                 "instruments": cmd_instruments, "sample-data": cmd_sample, "screen": cmd_screen, "universe": cmd_universe,
-                "backtest-stocks": cmd_backtest_stocks, "api": cmd_api,
+                "backtest-stocks": cmd_backtest_stocks, "api": cmd_api, "app": cmd_app,
                 "telegram-test": cmd_telegram_test}
     rc = handlers.get(args.cmd, cmd_control)(args, cfg)
     sys.exit(rc or 0)

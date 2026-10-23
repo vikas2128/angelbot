@@ -2,19 +2,38 @@ import pytest
 from starlette.testclient import TestClient
 
 from bot import alerts, api_server as API, control
+from bot import api_auth as AA
 from bot import settings as ST
 from bot.journal import Journal
+from passkey import SoftKey
 
-TOKEN = "t" * 43
-AUTH = {"Authorization": f"Bearer {TOKEN}"}
+RP = "bot.tail1234.ts.net"
+ORIGIN = f"https://{RP}"
+H = {"origin": ORIGIN, "x-requested-with": "angelbot"}
+AUTH = {}                                            # reads go by the session cookie now
+
+
+def _signed_in(store, c):
+    key = SoftKey(RP, ORIGIN)
+    r = c.post("/auth/register/options", json={"code": store.create_enrol_code("Phone")}, headers=H).json()
+    c.post("/auth/register/verify", json={"id": r["id"], "credential": key.create(r["options"])}, headers=H)
+    r = c.post("/auth/login/options", headers=H).json()
+    c.post("/auth/login/verify", json={"id": r["id"], "credential": key.get(r["options"])}, headers=H)
+
+
+def _client(tmp_path):
+    store = AA.AuthStore(RP, ORIGIN, folder=tmp_path / "app", notify_fn=lambda t: None)
+    return store, TestClient(API.create_app(store, tls=True), base_url=ORIGIN)
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     monkeypatch.setenv("ANGELBOT_PROFILE", "paper")
     for p in (control.STATUS, alerts.path(), ST.path()):
         p.unlink(missing_ok=True)
-    with TestClient(API.create_app(TOKEN, tls=True)) as c:
+    store, c = _client(tmp_path)
+    with c:
+        _signed_in(store, c)
         yield c
 
 
@@ -34,21 +53,29 @@ def test_startup_refuses_wrong_area_and_public_addresses(monkeypatch):
         API.main(["--host", "100.101.102.103"])
 
 
-def test_every_api_route_needs_the_token(client):
-    for path in ("/api/status", "/api/trades", "/api/settings", "/api/alerts", "/api/report", "/api/screener"):
+def test_every_api_route_needs_a_session(client):
+    client.cookies.clear()
+    for path in ("/api/status", "/api/trades", "/api/settings", "/api/alerts", "/api/report", "/api/screener", "/auth/devices"):
         assert client.get(path).status_code == 401, path
-        assert client.get(path, headers={"Authorization": "Bearer wrong"}).status_code == 401, path
     assert client.get("/healthz").json() == {"ok": True}
 
 
 def test_read_only_and_no_order_or_live_routes(client):
-    """Exactly these routes exist, all read-only. Anything that could trade, switch mode or touch secrets is absent."""
-    paths = {r.path for r in API.create_app(TOKEN).routes}
-    assert paths == {"/healthz", "/ws", "/api/status", "/api/trades", "/api/settings", "/api/alerts", "/api/report",
-                     "/api/screener"}
-    for path in paths - {"/ws"}:
+    """Data routes are GET-only; the only POSTs are login steps and device removal. Nothing can trade, switch mode
+    or touch secrets."""
+    app = API.create_app(AA.AuthStore(RP, ORIGIN, folder=None, notify_fn=lambda t: None))
+    paths = {r.path for r in app.routes}
+    assert {p for p in paths if p.startswith("/api/")} == {"/api/status", "/api/trades", "/api/settings", "/api/alerts",
+                                                           "/api/report", "/api/screener"}
+    assert {p for p in paths if p.startswith("/auth/")} == {
+        "/auth/me", "/auth/register/options", "/auth/register/verify", "/auth/login/options", "/auth/login/verify",
+        "/auth/stepup/options", "/auth/stepup/verify", "/auth/logout", "/auth/devices", "/auth/devices/remove"}
+    assert paths - {p for p in paths if p.startswith(("/api/", "/auth/"))} == {"/healthz", "/ws"}
+    for word in ("order", "buy", "sell", "live", "mode", "env", "profile", "broker"):
+        assert not any(word in p for p in paths), word
+    for path in (p for p in paths if p.startswith("/api/")):
         for method in ("post", "put", "patch", "delete"):
-            assert getattr(client, method)(path, headers=AUTH).status_code == 405, (method, path)
+            assert getattr(client, method)(path, headers=H).status_code == 405, (method, path)
 
 
 def test_security_headers(client):
@@ -57,6 +84,7 @@ def test_security_headers(client):
         assert k in r.headers, k
     assert r.headers["Cache-Control"] == "no-store" and "access-control-allow-origin" not in r.headers
     assert "frame-ancestors 'none'" in r.headers["Content-Security-Policy"]
+    client.cookies.clear()
     assert client.get("/api/status").headers["X-Frame-Options"] == "DENY"          # also on refusals
 
 
@@ -93,31 +121,13 @@ def test_report_and_screener_say_when_there_is_nothing_yet(client):
     assert r.status_code == 404 and "No screener snapshot" in r.json()["error"]
 
 
-def test_rate_limit(client, monkeypatch):
-    monkeypatch.setattr(API, "READS_PER_MIN", 3)
-    with TestClient(API.create_app(TOKEN)) as c:
-        codes = [c.get("/api/status", headers=AUTH).status_code for _ in range(5)]
-    assert codes == [200, 200, 200, 429, 429]
+def test_rate_limit(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANGELBOT_PROFILE", "paper")
+    monkeypatch.setattr(API, "READS_PER_MIN", 8)
+    store, c = _client(tmp_path)
+    with c:
+        _signed_in(store, c)                                          # 4 login steps count too
+        codes = [c.get("/api/status").status_code for _ in range(6)]
+    assert codes == [200, 200, 200, 200, 429, 429]
 
 
-def test_websocket_needs_the_token_first_then_streams_status(client, monkeypatch):
-    monkeypatch.setattr(API, "WS_PUSH_SEC", 0.05)
-    control.write_status({"state": "running", "mode": "paper"})
-    with client.websocket_connect("/ws") as ws:
-        ws.send_json({"auth": TOKEN})
-        msg = ws.receive_json()
-        assert msg["type"] == "status" and msg["status"]["state"] == "running"
-    with client.websocket_connect("/ws") as ws:
-        ws.send_json({"auth": "wrong"})
-        with pytest.raises(Exception):
-            ws.receive_json()
-    with pytest.raises(Exception):
-        with client.websocket_connect("/ws", headers={"origin": "https://evil.example"}) as ws:
-            ws.receive_json()
-
-
-def test_token_file_is_private(monkeypatch):
-    API.token_path().unlink(missing_ok=True)
-    tok = API.load_or_create_token()
-    assert len(tok) >= 40 and oct(API.token_path().stat().st_mode & 0o777) == "0o600"
-    assert API.load_or_create_token() == tok                     # kept across restarts

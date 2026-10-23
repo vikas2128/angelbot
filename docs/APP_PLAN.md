@@ -1,14 +1,21 @@
 # Build plan: AngelBot app (installable web app + private API over Tailscale)
 
-Status: **phases 0 to 2 built** (shared actions, alert outbox, read-only API with an interim token login); phases 3 to 7
-not built. The API is not deployed as a service yet: do not expose it until phase 3 (passkeys) is done. Telegram stays
-on as the backup alert and control channel.
+Status: **phases 0 to 3 built** (shared actions, alert outbox, read-only API, passkey login); phases 4 to 7 not built.
+The API is not installed as a service yet. Telegram stays on as the backup alert and control channel.
 
-Built so far: `bot/actions.py` (Telegram and Claude's MCP tools use it), `bot/alerts.py` (`notify.send` writes every
-alert to `runtime/paper/alerts.jsonl`), `bot/api_server.py` (`./deploy/ab paper api --dev` for a local try; GET-only
-routes, Tailscale-or-loopback bind check, HTTPS required off `--dev`, bearer token in `runtime/paper/app/api_token`,
-rate limit, security headers, WebSocket with the token as its first message). Built on Starlette and uvicorn, which
-the MCP server already installs, so no new framework.
+Built so far:
+- `bot/actions.py`: pause, resume, kill, paper restart and settings in one place (Telegram and Claude's MCP use it).
+- `bot/alerts.py`: `notify.send` writes every alert to `runtime/paper/alerts.jsonl`.
+- `bot/api_server.py` (`./deploy/ab paper api`): GET-only data routes and a live WebSocket; paper area only;
+  Tailscale-or-loopback bind check; HTTPS and a `.ts.net` name required off `--dev`; rate limit; security headers.
+- `bot/api_auth.py`: passkeys only (py_webauthn), user verification required; one-time enrolment codes made on the VM
+  (`./deploy/ab paper app enroll --name ...`, 10 minutes, one use, stored hashed); 12-hour sessions in an HttpOnly,
+  Secure, SameSite=Strict cookie, stored hashed; step-up within 2 minutes, bound to the session's own device; lockout
+  after 5 failures for 15 minutes (kept in memory: an API restart clears it); every POST needs the app's Origin and an
+  `X-Requested-With: angelbot` header, a JSON object body under 64 KB with only the expected fields; audit log in
+  `runtime/paper/app/audit.jsonl`; Telegram alerts for a new enrolment code, a new or removed device, a lockout and
+  "sign out everywhere". `app devices`, `app remove --id`, `app signout-all` on the VM.
+- Tests use a software passkey that signs real WebAuthn responses, so the library's verification runs in full.
 
 ## 1. Goal
 
