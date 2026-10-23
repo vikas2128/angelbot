@@ -25,15 +25,25 @@ session:
 instruments:
   - symbol: SBIN-EQ
     exchange: NSE
-    qty: 1                  # shares (for F&O: number of LOTS)
+    qty: 5                  # shares (for F&O: number of LOTS)
     product: INTRADAY       # INTRADAY (MIS) or CARRYFORWARD (NRML, F&O)
   # - symbol: NIFTY27OCT2625000CE
   #   exchange: NFO
   #   qty: 1
   #   product: CARRYFORWARD
 
+# Morning stock selection from the screener (off | auto | confirm; see README §6). With auto the bot screens at
+# screen_at and trades the top pick; if the screen fails or nothing passes it trades the instruments above.
+selection:
+  mode: auto
+  top_n: 1
+  screen_at: "09:16:30"
+  confirm_until: "09:19:30"
+  on_failure: config
+  qty: 5                    # shares per order for the picked stock
+
 strategy:
-  name: ema_cross           # ema_cross | orb | vwap_revert
+  name: ema_cross          # ema_cross | orb | vwap_revert
   timeframe_min: 1          # bar size in minutes
   allow_short: false        # intraday shorts on equity (true) or long-only (false)
   params:
