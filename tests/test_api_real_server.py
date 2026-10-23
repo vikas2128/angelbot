@@ -45,7 +45,8 @@ def server(tmp_path, monkeypatch):
     token, _ = store.login_verify(o["id"], key.get(o["options"]), "127.0.0.1")
     yield f"http://127.0.0.1:{port}", origin, {AA.COOKIE: token}
     srv.should_exit = True
-    th.join(5)
+    th.join(15)
+    assert not th.is_alive(), "uvicorn did not stop"           # fully gone before the next test (no stray threads)
 
 
 def test_pages_report_and_websocket_work_under_uvicorn(server):

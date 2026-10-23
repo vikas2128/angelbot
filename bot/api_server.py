@@ -46,6 +46,7 @@ from bot import alerts, control
 from bot import config as C
 from bot import settings as ST
 from bot.api_auth import COOKIE, SESSION_TTL, AuthError, AuthStore, _esc
+from bot.api_push import Pusher, PushError
 from bot.journal import query_readonly
 from bot.timeutil import now_ist
 
@@ -174,9 +175,10 @@ MAX_BODY = 64 * 1024
 CSRF_HEADER = ("x-requested-with", "angelbot")
 
 
-def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run) -> Starlette:
+def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run, pusher: Pusher | None = None) -> Starlette:
     """`store` holds devices and sessions (bot.api_auth). Reads need a session; actions need a session, the right
     Origin, the X-Requested-With header (CSRF) and a fresh step-up (a passkey check from the last 2 minutes)."""
+    pusher = pusher or Pusher(store)
     hits: dict[str, deque] = defaultdict(deque)
     acts: dict[str, deque] = defaultdict(deque)
     kill_asks: dict[str, tuple[str, float]] = {}       # session hash -> (confirmation token, expiry)
@@ -320,7 +322,8 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
         if not s:
             return secure(JSONResponse({"signed_in": False, "registered": bool(store.devices())}))
         return secure(JSONResponse({"signed_in": True, "device": s["name"], "expires": s["expires"],
-                                    "stepped_up": store.stepped_up(request.cookies.get(COOKIE))}))
+                                    "stepped_up": store.stepped_up(request.cookies.get(COOKIE)),
+                                    "push": pusher.device_has(s["device"])}))
 
     # ---- login steps
     def reg_options(data, ip, _t):
@@ -420,6 +423,27 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
         store.audit("action_settings_reset", ip=ip, device=device, count=n)
         return JSONResponse({"done": True, "reset": n})
 
+    # ---- push notifications (phase 6): a signed-in device turns them on or off for itself; no step-up needed
+    def push_key(_r):
+        return JSONResponse({"key": pusher.public_key()})
+
+    def push_subscribe(data, ip, token):
+        s = store.session(token)
+        try:
+            pusher.subscribe(data.get("subscription"), s["device"], s["name"])
+        except PushError as e:
+            raise BadRequest(str(e)) from None
+        return JSONResponse({"subscribed": True})
+
+    def push_unsubscribe(data, ip, token):
+        s = store.session(token)
+        return JSONResponse({"unsubscribed": pusher.unsubscribe(str(data.get("endpoint", "")), s["device"])})
+
+    def push_test(_d, ip, token):
+        s = store.session(token)
+        r = pusher.send("📝 PAPER · Test notification", f"Notifications work on {s['name']}.", only_device=s["device"])
+        return JSONResponse(r)
+
     def remove_device(data, ip, token):
         s = store.session(token)
         name = store.remove_device(str(data.get("id", "")), by=f"app: {s['name']}" if s else "app", ip=ip)
@@ -431,9 +455,21 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
             await sock.close(code=1008)
             return
         await sock.accept()
+        gone = asyncio.Event()
+
+        async def watch():                     # the phone left (or the server is stopping): end the loop at once
+            try:
+                while True:
+                    if (await sock.receive()).get("type") == "websocket.disconnect":
+                        break
+            except Exception:
+                pass
+            gone.set()
+
+        watcher = asyncio.create_task(watch())
         last = None
         try:
-            while True:
+            while not gone.is_set():
                 if not store.session(sock.cookies.get(COOKIE)):          # signed out or removed meanwhile
                     await sock.close(code=1008)
                     return
@@ -441,9 +477,14 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
                 if s.get("written_at") != last:
                     last = s.get("written_at")
                     await sock.send_json({"type": "status", "status": s})
-                await asyncio.sleep(WS_PUSH_SEC)
-        except (WebSocketDisconnect, RuntimeError):
+                try:
+                    await asyncio.wait_for(gone.wait(), WS_PUSH_SEC)
+                except asyncio.TimeoutError:
+                    pass
+        except (WebSocketDisconnect, RuntimeError, OSError):
             return
+        finally:
+            watcher.cancel()
 
     cred = ("id", "credential")
     routes = [*[Route(path, static) for path in STATIC],
@@ -456,6 +497,10 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
               Route("/auth/stepup/verify", auth_post(stepup_verify, need_session=True, allowed=cred), methods=["POST"]),
               Route("/auth/logout", auth_post(logout), methods=["POST"]),
               Route("/auth/devices", endpoint(devices)),
+              Route("/api/push/key", endpoint(push_key)),
+              Route("/api/push/subscribe", auth_post(push_subscribe, need_session=True, allowed=("subscription",)), methods=["POST"]),
+              Route("/api/push/unsubscribe", auth_post(push_unsubscribe, need_session=True, allowed=("endpoint",)), methods=["POST"]),
+              Route("/api/push/test", auth_post(push_test, need_session=True), methods=["POST"]),
               Route("/auth/devices/remove", auth_post(remove_device, need_session=True, need_stepup=True,
                                                       allowed=("id",)), methods=["POST"]),
               Route("/api/status", endpoint(status)), Route("/api/trades", endpoint(trades)),
@@ -500,9 +545,11 @@ def main(argv=None) -> None:
         raise StartupError("--name must be this VM's Tailscale HTTPS name (ends in .ts.net): see tailscale status")
     store = AuthStore(rp_id, origin_for(rp_id, args.port, args.dev))
     store.audit("api_started", detail=f"{rp_id}:{args.port}")
+    pusher = Pusher(store)
+    pusher.start()                                    # bot alerts -> push notifications
     import uvicorn
     log.warning("app API (read-only) for the paper area on %s://%s:%d", "http" if args.dev else "https", host, args.port)
-    uvicorn.run(create_app(store, tls=not args.dev), host=host, port=args.port, log_level="info",
+    uvicorn.run(create_app(store, tls=not args.dev, pusher=pusher), host=host, port=args.port, log_level="info",
                 ssl_certfile=None if args.dev else args.cert, ssl_keyfile=None if args.dev else args.key,
                 server_header=False, proxy_headers=False)
 

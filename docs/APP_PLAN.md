@@ -1,7 +1,7 @@
 # Build plan: AngelBot app (installable web app + private API over Tailscale)
 
-Status: **phases 0 to 5 built** (shared actions, alert outbox, read-only API, passkey login, actions, app screens);
-phases 6 (push) and 7 (deploy) not built.
+Status: **phases 0 to 6 built** (shared actions, alert outbox, read-only API, passkey login, actions, app screens,
+push notifications); phase 7 (deploy on the VM) not built.
 The API is not installed as a service yet. Telegram stays on as the backup alert and control channel.
 
 Built so far:
@@ -28,6 +28,11 @@ Built so far:
   the WebSocket, polling every 5 s if it drops. Install manifest, icons, and a service worker that keeps only the screens
   (never data) so the app opens and says so when the VM is out of reach. All text is set with textContent.
   Checked in a phone-size browser with sample data; passkeys themselves still need a real phone.
+- Push notifications (phase 6, `bot/api_push.py`, pywebpush 2.5.0): VAPID keys made on first use (`vapid.pem`, 0600);
+  a signed-in device turns notifications on or off for itself in Settings and can send itself a test; a watcher in
+  the API turns each new outbox alert into an encrypted push (RFC 8291) and never re-sends old ones after a restart;
+  only the browsers' own push services are accepted as endpoints (Google, Apple, Mozilla, Microsoft); gone (404/410)
+  and removed-device subscriptions are dropped; at most 3 per device. iPhone needs iOS 16.4+ and the home-screen app.
 - `tests/test_api_real_server.py` runs the API under real uvicorn over the network (WebSocket and report included).
 - Tests use a software passkey that signs real WebAuthn responses, so the library's verification runs in full.
 

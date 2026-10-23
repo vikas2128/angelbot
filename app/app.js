@@ -300,6 +300,56 @@ async function renderAlerts() {
       : h('p', { class: 'muted', text: 'No alerts yet.' })));
 }
 
+// ───────────────────────────── push notifications ─────────────────────────────
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function pushSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+// serviceWorker.ready never settles if the worker could not register: give up after a few seconds
+function swReady(ms = 4000) {
+  return Promise.race([navigator.serviceWorker.ready,
+    new Promise((_, no) => setTimeout(() => no(new Error('The app could not start its background worker. Reload and try again.')), ms))]);
+}
+async function currentSub() {
+  const reg = await swReady();
+  return reg.pushManager.getSubscription();
+}
+async function pushOn() {
+  if (Notification.permission === 'denied') throw new Error('Notifications are blocked for this app in the phone settings.');
+  if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications were not allowed.');
+  const { key } = await get('/api/push/key');
+  const reg = await swReady();
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u.dec(key) });
+  await post('/api/push/subscribe', { subscription: sub.toJSON() });
+}
+async function pushOff() {
+  const sub = await currentSub();
+  if (sub) { await post('/api/push/unsubscribe', { endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe(); }
+}
+async function notifyCard() {
+  const card = h('div', { class: 'card' }, h('h2', { text: 'Notifications' }));
+  if (!pushSupported()) {
+    card.append(h('p', { class: 'muted m0', text: isIOS && !standalone
+      ? 'On iPhone: tap Share, then “Add to Home Screen”, open AngelBot from there, and turn notifications on here.'
+      : 'This browser cannot show push notifications. Telegram still sends every alert.' }));
+    return card;
+  }
+  const sub = await currentSub().catch(() => null);
+  const on = !!sub && Notification.permission === 'granted';
+  card.append(h('p', { class: 'muted m0', text: on ? 'On for this device: every bot alert arrives as a notification.'
+    : 'Off for this device. Telegram still sends every alert.' }));
+  const btn = (text, klass, fn) => h('button', { class: 'btn ' + klass, text, onclick: async ev => {
+    ev.currentTarget.disabled = true;
+    try { await fn(); } catch (e) { toast(errText(e, 'Could not change notifications')); }
+    renderSettings();
+  } });
+  card.append(h('div', { class: 'btns mt8' }, on
+    ? [btn('Send a test', 'primary', async () => { const r = await post('/api/push/test'); toast(r.sent ? 'Test sent' : 'Nothing was sent: try turning notifications off and on'); }),
+       btn('Turn off', '', async () => { await pushOff(); toast('Notifications off for this device'); })]
+    : [btn('Turn on notifications', 'primary wide', async () => { await pushOn(); toast('Notifications on'); })]));
+  return card;
+}
+
 // ───────────────────────────── settings and devices ─────────────────────────────
 async function renderSettings(openId) {
   const view = $('#view');
@@ -337,7 +387,7 @@ async function renderSettings(openId) {
         try { await act('/auth/devices/remove', { id: x.id }); toast(`Removed ${x.name}`); renderSettings(); } catch (e) { toast(errText(e, 'Something went wrong')); } } })))),
     h('p', { class: 'muted small', text: 'Add a device: on the VM run ./deploy/ab paper app enroll --name "..." and register it from that device.' }),
     h('button', { class: 'btn', text: 'Sign out', onclick: async () => { try { await post('/auth/logout'); } catch (_) {} showSignIn(); } }));
-  view.replaceChildren(card, devCard);
+  view.replaceChildren(await notifyCard(), card, devCard);
 }
 
 // ───────────────────────────── tabs and start ─────────────────────────────

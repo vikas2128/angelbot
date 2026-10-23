@@ -70,7 +70,8 @@ def test_route_inventory_no_order_or_live_routes(client):
                "/api/control/restart", "/api/settings/set", "/api/settings/reset"}
     auth = {"/auth/me", "/auth/register/options", "/auth/register/verify", "/auth/login/options", "/auth/login/verify",
             "/auth/stepup/options", "/auth/stepup/verify", "/auth/logout", "/auth/devices", "/auth/devices/remove"}
-    assert paths == data | actions | auth | {"/healthz", "/ws"} | set(API.STATIC)
+    push = {"/api/push/key", "/api/push/subscribe", "/api/push/unsubscribe", "/api/push/test"}
+    assert paths == data | actions | auth | push | {"/healthz", "/ws"} | set(API.STATIC)
     for word in ("order", "buy", "sell", "live", "mode", "env", "profile", "broker", "shell", "exec", "sql", "file"):
         assert not any(word in p for p in paths), word
     for path in data:

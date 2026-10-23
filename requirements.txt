@@ -10,3 +10,4 @@ starlette>=0.40     # the app's API (also installed by mcp)
 uvicorn>=0.30
 websockets>=13      # uvicorn needs it for the app's live WebSocket
 webauthn==3.0.1    # passkey login for the app (Duo Labs py_webauthn)
+pywebpush==2.5.0   # the app's push notifications (web-push-libs)
