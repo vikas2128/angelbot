@@ -110,7 +110,7 @@ def test_restart_confirms_rechecks_and_runs_systemctl(monkeypatch):
     monkeypatch.setattr(T, "RESTART_RUNNER", lambda cmd, **kw: calls.append(cmd) or SimpleNamespace(returncode=0, stderr=""))
     _running(trades_today=2)
     text, rows = callback("rst_ask")
-    assert "Restart the paper bot" in text and "start again from zero" in text
+    assert "Restart the paper bot" in text and "still count towards the daily limits" in text
     stamp = rows[0][0]["callback_data"].split(":")[1]
     assert "expired" in callback(f"rst_do:{stamp}", now=int(stamp) + 61)[0] and not calls
     _running(positions=[{"symbol": "SBIN-EQ", "qty": 5}])                  # a trade opened in between

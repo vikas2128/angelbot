@@ -305,8 +305,8 @@ def restart_ask() -> tuple[str, list[list[dict]]]:
              "Today's picked stocks are kept, so a new selection mode or number of picks fully applies tomorrow. "
              "Shares, risk limits and exits apply right away."]
     if s.get("trades_today"):
-        lines.append(f"⚠️ It has made {s['trades_today']} trade(s) today. After a restart the day's trade count and "
-                     "loss limit start again from zero.")
+        lines.append(f"It has made {s['trades_today']} trade(s) today. They still count towards the daily limits "
+                     "after the restart.")
     return "\n".join(lines), [[_btn("🔄 Yes, restart", f"rst_do:{int(time.time())}")], [_btn("Cancel", "cfg")]]
 
 

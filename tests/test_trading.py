@@ -192,3 +192,60 @@ def test_cooldown_alert_after_consecutive_losses(cfg, inst, tmp_path, monkeypatc
     assert not any("Taking a break" in m for m in sent)
     eng._on_trade_closed(-5.0, t("10:00"))
     assert sum("Taking a break" in m for m in sent) == 1 and "10:30" in sent[-1]
+
+
+# ---------------------------------------------------------------- restart: the day's limits carry on
+def _journal_with(tmp_path, trades, name="j.db"):
+    j = Journal(tmp_path / name)
+    for mode, hhmm, gross, fee in trades:
+        j.trade(mode, "SBIN-EQ", "LONG", 5, t(hhmm) - timedelta(minutes=5), 800, t(hhmm), 800 + gross / 5, gross, fee,
+                "stop_loss" if gross < 0 else "target", "ema_cross")
+    return j
+
+
+def _restored(cfg, inst, j, monkeypatch, now):
+    from bot import notify
+    monkeypatch.setattr(notify, "send", lambda text, buttons=None: None)
+    eng = Engine(cfg, PaperBroker(0.0), _FakeFeed(), [inst], j, queue.Queue())
+    eng.now = lambda: now
+    eng.restore_day()
+    return eng
+
+
+def test_restart_rebuilds_trade_count_pnl_and_fees_from_today(cfg, inst, tmp_path, monkeypatch):
+    j = _journal_with(tmp_path, [("paper", "09:40", 30.0, 3.0), ("paper", "10:10", -20.0, 3.0),
+                                 ("live", "10:20", -500.0, 3.0)])               # another mode's trade is not counted
+    j.trade("paper", "SBIN-EQ", "LONG", 5, t("09:30") - timedelta(days=1), 800, t("09:35") - timedelta(days=1), 790,
+            -50.0, 3.0, "stop_loss", "ema_cross")                                # yesterday: not counted
+    eng = _restored(cfg, inst, j, monkeypatch, t("11:00"))
+    assert eng.risk.trades_today == 2 and eng.om.realized_net == pytest.approx(27.0 - 23.0)
+    assert eng.om.charges_today == pytest.approx(6.0) and eng.restored["trades"] == 2
+    assert eng.risk.consecutive_losses == 1
+
+
+def test_restart_keeps_the_daily_loss_halt_and_the_trade_cap(cfg, inst, tmp_path, monkeypatch):
+    loss = float(cfg["risk"]["max_daily_loss"])
+    eng = _restored(cfg, inst, _journal_with(tmp_path, [("paper", "10:00", -loss, 5.0)]), monkeypatch, t("11:00"))
+    assert eng.risk.check_pnl_limits(eng.om.realized_net)                       # still halted after the restart
+    cap = int(cfg["risk"]["max_trades_per_day"])
+    eng2 = _restored(cfg, inst, _journal_with(tmp_path, [("paper", f"10:{i:02d}", 1.0, 0.5) for i in range(cap)], "cap.db"), monkeypatch, t("11:00"))
+    ok, why = eng2.risk.can_enter(t("11:00"), 0, 4000)
+    assert not ok and why == "max_trades_per_day reached"
+
+
+def test_restart_restores_a_running_cooldown_only(cfg, inst, tmp_path, monkeypatch):
+    n = int(cfg["risk"]["max_consecutive_losses"])
+    losses = [("paper", f"10:{i:02d}", -5.0, 1.0) for i in range(n)]             # the streak ends at 10:0(n-1)
+    eng = _restored(cfg, inst, _journal_with(tmp_path, losses), monkeypatch, t("10:15"))
+    mins = int(cfg["risk"]["cooldown_minutes"])
+    assert eng.risk.cooldown_until == t(f"10:{n - 1:02d}") + timedelta(minutes=mins)
+    assert eng.restored["cooldown_until"] == eng.risk.cooldown_until
+    later = _restored(cfg, inst, _journal_with(tmp_path, losses, "later.db"),
+                      monkeypatch, t("13:00"))
+    assert later.risk.cooldown_until is None                                     # already over
+
+
+def test_start_message_says_what_carried_over():
+    from bot import messages as M
+    text = M.started("paper", "ema_cross", ["SBIN-EQ"], None, {"trades": 3, "net": -12.5, "cooldown_until": t("10:30")})
+    assert "Carried on from earlier today: 3 trade(s)" in text and "10:30" in text

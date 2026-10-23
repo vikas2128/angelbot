@@ -91,10 +91,15 @@ def _day(day: str) -> str:
 
 
 # ───────────────────────────── alerts from the bot ─────────────────────────────
-def started(mode, strategy, symbols, overrides=None) -> str:
+def started(mode, strategy, symbols, overrides=None, restored=None) -> str:
     text = (f"▶️ <b>AngelBot started</b>\n{mode_tag(mode)}\n"
             f"Looking for: {strategy_name(strategy)}\n"
             f"Watching: {esc(', '.join(symbols))}")
+    if restored:
+        text += (f"\n↪️ Carried on from earlier today: {restored['trades']} trade(s), {money(restored['net'])} after fees. "
+                 "The daily limits count these.")
+        if restored.get("cooldown_until"):
+            text += f" Resting after losses until {restored['cooldown_until']:%H:%M}."
     if overrides:
         text += "\n⚙️ Changed in Telegram: " + esc("; ".join(overrides))
     return text

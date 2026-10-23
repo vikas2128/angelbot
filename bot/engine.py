@@ -56,6 +56,33 @@ class Engine:
         self.exit_code = 0
         self._feed_alerted = False       # notification state only
         self._heartbeat_sent = False
+        self.restored: dict | None = None
+        if not replay:
+            self.restore_day()
+
+    def restore_day(self) -> None:
+        """After a restart, rebuild today's trade count, realised P&L, fees, loss streak and cooldown from the journal,
+        so the daily limits carry on from where they were instead of starting again from zero."""
+        day = self.now().strftime("%Y-%m-%d")
+        try:
+            rows = [r for r in trades_on(self.journal, day) if r["mode"] == self.broker.mode]
+        except Exception as e:
+            log.error("could not read today's trades to restore the day's limits: %s", e)
+            return
+        if not rows:
+            return
+        for r in rows:
+            net = float(r["net_pnl"] or 0)
+            self.om.realized_net += net
+            self.om.charges_today += float(r["charges"] or 0)
+            self.risk.on_trade_closed(net, datetime.fromisoformat(r["exit_ts"]))
+        self.risk.trades_today = len(rows)
+        if self.risk.cooldown_until and self.risk.cooldown_until <= self.now():
+            self.risk.cooldown_until = None
+        self.restored = {"trades": len(rows), "net": round(self.om.realized_net, 2),
+                         "cooldown_until": self.risk.cooldown_until}
+        log.warning("restored today's state from the journal: %d trades, net %.2f", len(rows), self.om.realized_net)
+        self.journal.event(self.now(), "restored", f"trades={len(rows)} net={self.om.realized_net:.2f}")
 
     # ------------------------------------------------------------------ time
     def now(self) -> datetime:
@@ -288,6 +315,7 @@ class Engine:
             for p in self.broker.positions():
                 if p["symbol"] in self.om.positions and p["netqty"] != 0:
                     self.om.adopt(p["symbol"], p["netqty"], p["avg"], self.now())
+                    self.risk.trades_today += 1          # its entry counted towards today's trades before the restart
                     notify.send(messages.adopted(p["symbol"], p["netqty"], p["avg"]))
         except Exception as e:
             log.error("reconcile failed: %s", e)
@@ -303,7 +331,7 @@ class Engine:
         self.journal.event(self.now(), "start", f"mode={self.broker.mode} replay={self.replay} profile={os.environ.get('ANGELBOT_PROFILE', '')}")
         from bot import settings
         notify.send(messages.started(self.broker.mode, self.strategy_name, [i.symbol for i in self.instruments],
-                                     None if self.replay else settings.summary()))
+                                     None if self.replay else settings.summary(), self.restored))
         self.feed.start()
         ended = False
         try:

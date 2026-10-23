@@ -245,7 +245,8 @@ Tap a setting, then a value. Only fixed choices are offered, no typed values:
 - **🔄 Restart bot now** (paper only) applies them at once. It is offered only while the bot runs with **no open position
   and no waiting order** (a paper position lives only in the bot's memory), asks to confirm within a minute, and checks
   again before restarting. After a restart today's picked stocks are kept (a new mode or number of picks fully applies
-  tomorrow), and the day's trade count and loss limit start again from zero.
+  tomorrow). The day's closed trades still count: at start the bot rebuilds today's trade count, P&L after fees,
+  loss streak and cooldown from the journal (also after a crash restart), and the start alert says so.
 - Not changeable here, on purpose: paper/live mode, orders per second, order type, the order cap, session times.
 - Claude sees the overrides too: the `get_config` and `validate_config` tools list them.
 
