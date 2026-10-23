@@ -16,6 +16,36 @@ function h(tag, attrs = {}, ...kids) {
   for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : String(kid));
   return el;
 }
+// line icons, drawn here (24x24, stroke): no icon font, no outside files
+const ICONS = {
+  home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+  trades: 'M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01',
+  screener: 'M3 5h18l-7 8.5V19l-4 2v-7.5z',
+  report: 'M4 20V11M10 20V5M16 20v-6M21 20H3',
+  alerts: 'M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 21h4',
+  settings: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4',
+  pause: 'M9 5v14M15 5v14',
+  play: 'M8 5.5v13l10-6.5z',
+  restart: 'M20 12a8 8 0 1 1-2.34-5.66M20 4v4.5h-4.5',
+  stop: 'M8.5 3h7L21 8.5v7L15.5 21h-7L3 15.5v-7zM9 12h6',
+  refresh: 'M20 12a8 8 0 1 1-2.34-5.66M20 4v4.5h-4.5',
+  chevron: 'M9 6l6 6-6 6',
+  left: 'M15 6l-6 6 6 6',
+  right: 'M9 6l6 6-6 6',
+  bell: 'M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 21h4',
+  logout: 'M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 8l-4 4 4 4M6 12h10',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  key: 'M14.5 9.5a4.5 4.5 0 1 1-1.3-3.2M13.5 10.5 21 18v3h-3v-2h-2v-2h-2l-1.7-1.7',
+};
+function icon(name, cls = 'i') {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', cls); svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(NS, 'path'); path.setAttribute('d', ICONS[name] || '');
+  svg.append(path);
+  return svg;
+}
+function setAction(el) { $('#hdr-action').replaceChildren(...(el ? [el] : [])); }
 const inr = (x, sign = true) => {
   if (x == null || isNaN(x)) return '–';
   const v = Number(x), s = v > 0 && sign ? '+' : v < 0 ? '−' : '';
@@ -135,7 +165,7 @@ async function showSignIn() {
   let me = {};
   try { me = await get('/auth/me'); } catch (_) {}
   const view = $('#view'); view.replaceChildren();
-  const box = h('div', { class: 'signin' }, h('h1', { text: 'AngelBot' }));
+  const box = h('div', { class: 'signin' }, h('img', { class: 'logo', src: '/icon.svg', alt: '' }), h('h1', { text: 'AngelBot' }));
   if (!passkeySupported()) {
     box.append(h('p', { class: 'banner bad', text: 'This browser has no passkey support. Use Safari or Chrome on a recent phone.' }));
   } else if (!me.registered) {
@@ -146,7 +176,7 @@ async function showSignIn() {
       catch (e) { toast(errText(e, 'Registration was cancelled')); go.disabled = false; }
     } });
     box.append(h('p', { class: 'muted', text: 'Register this phone once. On the VM run:' }),
-      h('p', { class: 'card small pre', text: './deploy/ab paper app enroll --name "My phone"' }),
+      h('p', { class: 'code', text: './deploy/ab paper app enroll --name "My phone"' }),
       h('p', { class: 'muted', text: 'and type the code here (valid 10 minutes). Then confirm with Face ID or your fingerprint.' }), input, go);
   } else {
     const go = h('button', { class: 'btn primary', text: 'Sign in with passkey', onclick: async () => {
@@ -193,18 +223,19 @@ function strategyLines(sym, st) {
     `buy below ${price(st.buy_below)} · sell above ${price(st.sell_above)}`];
   return [`${sym} · ${bars} bars`];
 }
+const STRATEGY_NAMES = { ema_cross: 'EMA crossover', orb: 'Opening range breakout', vwap_revert: 'VWAP reversion' };
+function stat(label, value, klass = '') { return h('div', { class: 'stat' }, h('div', { class: 'l', text: label }), h('div', { class: 'v ' + klass, text: value })); }
 function renderHome() {
   if (state.tab !== 'home') return;
   const s = state.status || {}, ctl = s.control || {}, view = $('#view');
-  const alive = !!s.bot_alive, mode = (s.mode || '').toUpperCase();
-  const head = h('div', { class: 'card' },
+  const alive = !!s.bot_alive, mode = (s.mode || 'paper').toUpperCase();
+  const hero = h('div', { class: 'card hero' },
     h('div', { class: 'row' },
-      h('span', { class: 'pill ' + (alive ? 'ok' : 'off'), text: alive ? 'Bot running' : 'Bot not running' }),
-      h('span', { class: 'pill ' + (mode === 'LIVE' ? 'bad' : 'off'), text: mode === 'LIVE' ? 'LIVE · real money' : (mode || 'PAPER') + ' · simulated' })),
-    h('h2', { class: 'mt12', text: 'Today after fees' }),
-    h('div', { class: 'big ' + cls(s.day_pnl), text: inr(s.day_pnl) }),
-    h('div', { class: 'muted small', text: `${s.trades_today || 0} trades · fees ${price(s.charges_today || 0)}` +
-      (s.written_at ? ` · updated ${hhmm(s.written_at)}${s.age_sec != null ? ` (${Math.round(s.age_sec)} s ago)` : ''}` : '') }));
+      h('span', { class: 'pill ' + (alive ? 'ok' : 'off'), text: alive ? 'Running' : 'Not running' }),
+      h('span', { class: 'pill plain ' + (mode === 'LIVE' ? 'bad' : 'off'), text: mode === 'LIVE' ? 'LIVE · real money' : `${mode} · simulated` })),
+    h('div', { class: 'pnl ' + cls(s.day_pnl), text: inr(s.day_pnl) }),
+    h('div', { class: 'meta', text: `Today after fees · ${s.trades_today || 0} trade${s.trades_today === 1 ? '' : 's'} · fees ${price(s.charges_today || 0)}` +
+      (s.written_at ? ` · ${hhmm(s.written_at)}` : '') }));
   const flags = [];
   if (s.halted_reason) flags.push(h('div', { class: 'banner bad', text: `Stopped for today: ${s.halted_reason}` }));
   if (s.cooldown_until) flags.push(h('div', { class: 'banner', text: `Resting after losses until ${hhmm(s.cooldown_until)}` }));
@@ -213,37 +244,37 @@ function renderHome() {
   const feed = s.feed || {};
   if (alive && feed.connected === false) flags.push(h('div', { class: 'banner bad', text: 'Price feed is disconnected' }));
   const pos = s.positions || [];
-  const posCard = h('div', { class: 'card' }, h('h2', { text: 'Position' }),
-    pos.length ? pos.map(p => h('dl', { class: 'kv' },
-      h('dt', { text: p.symbol }), h('dd', { text: `${p.qty} shares at ${price(p.avg)}` }),
-      h('dt', { text: 'Now' }), h('dd', { class: cls(p.unrealized), text: `${price(p.ltp)} · ${inr(p.unrealized)}` }),
-      h('dt', { text: 'Safety exit' }), h('dd', { text: price(p.stop) }),
-      h('dt', { text: 'Goal' }), h('dd', { text: price(p.target) })))
-      : h('p', { class: 'muted m0', text: 'No open position' }));
+  const posCard = h('div', { class: 'card' },
+    h('div', { class: 'row' }, h('h2', { class: 'm0', text: 'Position' }), pos.length ? h('span', { class: 'pill plain', text: pos.map(p => p.symbol).join(', ') }) : null),
+    pos.length ? pos.map(p => h('div', { class: 'grid2 mt8' },
+      stat('Shares', `${p.qty} @ ${price(p.avg)}`), stat('Now', `${price(p.ltp)}`),
+      stat('Open P&L', inr(p.unrealized), cls(p.unrealized)), stat('Stop / target', `${price(p.stop)} / ${price(p.target)}`)))
+      : h('p', { class: 'muted m0 mt8 small', text: 'No open position' }));
   const strat = Object.entries(s.strategy_state || {});
-  const stratCard = h('div', { class: 'card' }, h('h2', { text: `Strategy · ${String(s.strategy || '').split('(')[0] || '–'}` }),
-    strat.length ? h('ul', { class: 'lines' }, strat.flatMap(([sym, st]) => strategyLines(sym, st)).map(t => h('li', { text: t })))
-      : h('p', { class: 'muted m0', text: (s.instruments || []).join(', ') || 'No data yet' }),
-    h('div', { class: 'muted small mt8', text: Object.entries(s.ltp || {}).map(([k, v]) => `${k} ${price(v)}`).join(' · ') }));
-  const btn = (text, klass, fn) => h('button', { class: 'btn ' + klass, text, onclick: async ev => {
+  const ltp = Object.entries(s.ltp || {}).map(([k, v]) => `${k.replace(/-EQ$/, '')} ${price(v)}`).join(' · ');
+  const stratCard = h('div', { class: 'card' },
+    h('div', { class: 'row' }, h('h2', { class: 'm0', text: STRATEGY_NAMES[String(s.strategy || '').split('(')[0]] || 'Strategy' }), ltp ? h('span', { class: 'small muted', text: ltp }) : null),
+    strat.length ? h('ul', { class: 'lines mt8' }, strat.flatMap(([sym, st]) => strategyLines(sym, st)).map((t, i) => h('li', { class: i % 2 ? 'sub' : '', text: t })))
+      : h('p', { class: 'muted m0 mt8 small', text: (s.instruments || []).join(', ') || 'No data yet' }));
+  const btn = (name, text, klass, fn) => h('button', { class: 'btn ' + klass, onclick: async ev => {
     const b = ev.currentTarget; b.disabled = true;
     try { await fn(); } catch (e) { toast(errText(e, 'Cancelled')); } finally { b.disabled = false; }
-  } });
-  const controls = h('div', { class: 'card' }, h('h2', { text: 'Controls' }), h('div', { class: 'btns' },
-    ctl.paused ? btn('▶ Resume', 'primary', async () => { await act('/api/control/resume'); toast('Resumed: new trades allowed'); refreshStatus(); })
-               : btn('⏸ Pause', '', async () => { await act('/api/control/pause'); toast('Paused: no new trades'); refreshStatus(); }),
-    btn('🔄 Restart', '', async () => {
+  } }, icon(name), text);
+  const controls = h('div', { class: 'card' }, h('h2', { text: 'Controls' }), h('div', { class: 'ctl' },
+    ctl.paused ? btn('play', 'Resume', 'primary', async () => { await act('/api/control/resume'); toast('Resumed: new trades allowed'); refreshStatus(); })
+               : btn('pause', 'Pause', '', async () => { await act('/api/control/pause'); toast('Paused: no new trades'); refreshStatus(); }),
+    btn('restart', 'Restart', '', async () => {
       if (!confirm('Restart the paper bot now? Only works with no open position.')) return;
       await act('/api/control/restart'); toast('Restarting the paper bot…');
     }),
-    btn('🛑 Emergency stop', 'danger wide', async () => {
+    btn('stop', 'Stop', 'danger', async () => {
       if (!confirm('Emergency stop: cancel waiting entries, close ALL positions and stop the bot?')) return;
       const ask = await act('/api/control/kill/ask');
       if (!confirm('Are you sure? This cannot be undone from here today.')) return;
       await act('/api/control/kill/confirm', { confirm: ask.confirm }); toast('Emergency stop set'); refreshStatus();
     })),
-    h('p', { class: 'muted small mt8 mb0', text: 'Each action asks for Face ID if your last check is over 2 minutes old.' }));
-  view.replaceChildren(head, ...flags, posCard, stratCard, controls);
+    h('p', { class: 'hint', text: 'Actions ask for Face ID if your last check is over 2 minutes old. Stop is the emergency stop.' }));
+  view.replaceChildren(hero, ...flags, posCard, stratCard, controls);
 }
 async function refreshStatus() { try { state.status = await get('/api/status'); renderHome(); } catch (_) {} }
 
@@ -252,23 +283,28 @@ async function renderTrades(day) {
   const view = $('#view');
   const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);    // IST date
   day = day || today;
+  const shift = n => { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); const x = d.toISOString().slice(0, 10); return x > today ? today : x; };
   const picker = h('input', { type: 'date', class: 'field', value: day, max: today, onchange: e => renderTrades(e.target.value) });
-  view.replaceChildren(h('div', { class: 'card' }, h('h2', { text: 'Day' }), picker), h('p', { class: 'muted center', text: 'Loading…' }));
+  const bar = h('div', { class: 'daybar' },
+    h('button', { class: 'iconbtn', 'aria-label': 'Previous day', onclick: () => renderTrades(shift(-1)) }, icon('left')), picker,
+    h('button', { class: 'iconbtn', 'aria-label': 'Next day', disabled: day >= today, onclick: () => renderTrades(shift(1)) }, icon('right')));
+  view.replaceChildren(bar, h('p', { class: 'muted center small', text: 'Loading…' }));
   let d;
   try { d = await get('/api/trades?date=' + encodeURIComponent(day)); } catch (e) { view.lastChild.textContent = e.message; return; }
   const t = d.totals;
-  const sum = h('div', { class: 'card' }, h('h2', { text: day === today ? 'Today' : day }),
-    h('div', { class: 'big ' + cls(t.net_pnl), text: inr(t.net_pnl) }),
-    h('div', { class: 'muted small', text: `${t.trades} trades · ${t.win_rate_pct}% won · gross ${inr(t.gross_pnl)} · fees ${price(t.charges)}` }));
+  const sum = h('div', { class: 'card hero' },
+    h('div', { class: 'row' }, h('h2', { class: 'm0', text: day === today ? 'Today' : day }), h('span', { class: 'pill plain', text: `${t.trades} trade${t.trades === 1 ? '' : 's'}` })),
+    h('div', { class: 'pnl ' + cls(t.net_pnl), text: inr(t.net_pnl) }),
+    h('div', { class: 'grid2 mt8' }, stat('Won', `${t.win_rate_pct}%`), stat('Gross', inr(t.gross_pnl), cls(t.gross_pnl)), stat('Fees', price(t.charges)), stat('After fees', inr(t.net_pnl), cls(t.net_pnl))));
   const rows = d.trades.map(r => h('tr', {},
-    h('td', { text: `${hhmm(r.entry_ts)}–${hhmm(r.exit_ts)}` }), h('td', { text: r.symbol.replace(/-EQ$/, '') }),
-    h('td', { class: 'r', text: `${r.qty} @ ${Number(r.entry_price).toFixed(2)}→${Number(r.exit_price).toFixed(2)}` }),
+    h('td', {}, h('div', { text: r.symbol.replace(/-EQ$/, '') }), h('div', { class: 'small muted', text: `${hhmm(r.entry_ts)}–${hhmm(r.exit_ts)}` })),
+    h('td', { class: 'r' }, h('div', { text: `${r.qty} × ${Number(r.entry_price).toFixed(2)}` }), h('div', { class: 'small muted', text: `→ ${Number(r.exit_price).toFixed(2)}` })),
     h('td', { class: 'r nw ' + cls(r.net_pnl), text: inr(r.net_pnl) })));
   const table = d.trades.length ? h('div', { class: 'card scroll' }, h('table', {},
-      h('thead', {}, h('tr', {}, h('th', { text: 'Time' }), h('th', { text: 'Stock' }), h('th', { class: 'r', text: 'Shares, in→out' }), h('th', { class: 'r', text: 'Net' }))),
+      h('thead', {}, h('tr', {}, h('th', { text: 'Stock' }), h('th', { class: 'r', text: 'In → out' }), h('th', { class: 'r', text: 'Net' }))),
       h('tbody', {}, rows)))
-    : h('p', { class: 'muted center', text: 'No closed trades on this day.' });
-  view.replaceChildren(h('div', { class: 'card' }, h('h2', { text: 'Day' }), picker), sum, table);
+    : h('p', { class: 'muted center small', text: 'No closed trades on this day.' });
+  view.replaceChildren(bar, sum, table);
 }
 
 // ───────────────────────────── report and screener (server-built pages, shown framed) ─────────────────
@@ -280,10 +316,12 @@ async function renderFrame(path, emptyHint) {
     if (r.status === 401) return showSignIn();
     if (!r.ok) { const e = await r.json().catch(() => ({})); view.replaceChildren(h('div', { class: 'banner', text: e.error || emptyHint })); return; }
   } catch (_) { view.replaceChildren(h('div', { class: 'banner bad', text: "Can't reach the bot." })); return; }
-  // no scripts can run in it: the server sends these pages with a policy that allows no scripts at all
-  const frame = h('iframe', { class: 'frame', src: path, title: path, referrerpolicy: 'no-referrer' });
-  const reload = h('button', { class: 'btn', text: '↻ Refresh', onclick: () => { frame.src = path + (path.includes('?') ? '&' : '?') + 't=' + Date.now(); } });
-  view.replaceChildren(frame, reload);
+  // no scripts can run in it: the server sends these pages with a policy that allows no scripts at all.
+  // embed=1 asks for the compact phone layout.
+  const url = path + (path.includes('?') ? '&' : '?') + 'embed=1';
+  const frame = h('iframe', { class: 'frame', src: url, title: path, referrerpolicy: 'no-referrer' });
+  setAction(h('button', { class: 'iconbtn', 'aria-label': 'Refresh', onclick: () => { frame.src = url + '&t=' + Date.now(); } }, icon('refresh')));
+  view.replaceChildren(frame);
 }
 
 // ───────────────────────────── alerts ─────────────────────────────
@@ -293,10 +331,11 @@ async function renderAlerts() {
   let d;
   try { d = await get('/api/alerts?limit=100'); } catch (e) { view.replaceChildren(h('div', { class: 'banner', text: e.message })); return; }
   const items = d.alerts.slice().reverse();
+  setAction(h('button', { class: 'iconbtn', 'aria-label': 'Refresh', onclick: () => renderAlerts() }, icon('refresh')));
   view.replaceChildren(h('div', { class: 'card' }, h('h2', { text: 'Recent alerts' }),
     items.length ? h('div', { class: 'list' }, items.map(a => h('div', { class: 'item' },
-      h('div', { class: 't', text: `${String(a.ts).slice(0, 16).replace('T', ' ')} · ${a.label || ''}` }),
-      h('div', { class: 'pre', text: a.text }))))
+      h('div', { class: 't', text: `${String(a.ts).slice(5, 16).replace('T', ' ')} · ${a.label || ''}` }),
+      h('div', { class: 'x pre', text: a.text }))))
       : h('p', { class: 'muted', text: 'No alerts yet.' })));
 }
 
@@ -359,8 +398,8 @@ async function renderSettings(openId) {
   const card = h('div', { class: 'card' }, h('h2', { text: `Settings · ${d.area}` }));
   for (const p of d.problems || []) card.append(h('div', { class: 'banner', text: p }));
   for (const s of d.settings) {
-    const row = h('button', { class: 'setting', onclick: () => renderSettings(openId === s.id ? null : s.id) },
-      h('div', { class: 'row' }, h('span', { text: s.label + (s.changed ? ' ✏️' : '') }), h('span', { class: 'v', text: s.value })));
+    const row = h('button', { class: 'setting', 'aria-expanded': openId === s.id ? 'true' : 'false', onclick: () => renderSettings(openId === s.id ? null : s.id) },
+      h('span', { text: s.label + (s.changed ? ' ✏️' : '') }), h('span', { class: 'v' }, s.value, icon('chevron')));
     card.append(row);
     if (openId === s.id) {
       const wrap = h('div', { class: 'choices' }, s.choices.map(c => h('button', { class: 'chip' + (c.current ? ' on' : ''), text: c.label,
@@ -374,8 +413,8 @@ async function renderSettings(openId) {
       }
     }
   }
-  card.append(h('p', { class: 'muted small', text: '✏️ = changed here (wins over config.yaml). Changes apply from the next start and are not backtested.' }),
-    h('button', { class: 'btn', text: '↩ Reset all to config.yaml', onclick: async () => {
+  card.append(h('p', { class: 'hint', text: '✏️ changed here (wins over config.yaml). Applies from the next start; not backtested.' }),
+    h('button', { class: 'btn wide mt8', text: 'Reset all to config.yaml', onclick: async () => {
       if (!confirm('Reset every changed setting to config.yaml?')) return;
       try { const r = await act('/api/settings/reset'); toast(`Reset ${r.reset} setting(s)`); renderSettings(); } catch (e) { toast(errText(e, 'Something went wrong')); } } }));
   const devCard = h('div', { class: 'card' }, h('h2', { text: 'Devices' }),
@@ -386,13 +425,14 @@ async function renderSettings(openId) {
         if (!confirm(`Remove ${x.name}? It is signed out at once.`)) return;
         try { await act('/auth/devices/remove', { id: x.id }); toast(`Removed ${x.name}`); renderSettings(); } catch (e) { toast(errText(e, 'Something went wrong')); } } })))),
     h('p', { class: 'muted small', text: 'Add a device: on the VM run ./deploy/ab paper app enroll --name "..." and register it from that device.' }),
-    h('button', { class: 'btn', text: 'Sign out', onclick: async () => { try { await post('/auth/logout'); } catch (_) {} showSignIn(); } }));
+    h('button', { class: 'btn wide mt8', onclick: async () => { try { await post('/auth/logout'); } catch (_) {} showSignIn(); } }, icon('logout'), 'Sign out'));
   view.replaceChildren(await notifyCard(), card, devCard);
 }
 
 // ───────────────────────────── tabs and start ─────────────────────────────
 function show(tab) {
   state.tab = tab;
+  setAction(null);
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === tab);
   window.scrollTo(0, 0);
   if (tab === 'home') { renderHome(); refreshStatus(); }
@@ -409,7 +449,7 @@ async function boot() {
   connectLive();
   show(state.tab);
 }
-document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
+document.querySelectorAll('#tabs button').forEach(b => { b.prepend(icon(b.dataset.icon)); b.addEventListener('click', () => show(b.dataset.tab)); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.me && state.me.signed_in) { connectLive(); if (state.tab === 'home') refreshStatus(); } });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 boot();

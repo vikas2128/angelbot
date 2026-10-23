@@ -79,6 +79,33 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js",
 EMBED_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'self'; base-uri 'none'"
 
 
+# added to the report and screener pages when the app shows them (?embed=1): phone-sized type and spacing, the app's
+# own colours, and no "open in your browser" hint (the Telegram copies are unchanged)
+EMBED_STYLE = """<style>
+:root{--bg:#fff;--panel:#f2f2f7;--line:#e5e5ea;--accent:#0a66ff}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1e;--panel:#2c2c2e;--line:#3a3a3c;--accent:#3b8bff}}
+html,body{font:13px/1.4 -apple-system,BlinkMacSystemFont,system-ui,sans-serif!important;-webkit-text-size-adjust:100%}
+.wrap{padding:12px 12px 20px!important;gap:10px!important}
+h1{font:700 18px/1.2 -apple-system,system-ui,sans-serif!important;margin:0!important;letter-spacing:-.01em}
+h2{font-size:12px!important}.ph{font:700 16px/1.25 -apple-system,system-ui,sans-serif!important}
+.sub,.note,.kpi .l,.kpi .n,.pick .rk,.chips{font-size:11.5px!important}
+.card{padding:10px 12px!important;border:0!important;border-radius:10px!important}
+.banner{padding:8px 10px!important;font-size:12px!important;border:0!important}
+.kpis,.picks{gap:8px!important}.kpis{grid-template-columns:1fr 1fr!important}
+.kpi .v{font:700 19px/1.2 -apple-system,system-ui,sans-serif!important}
+.pick .sym{font:700 16px/1.2 -apple-system,system-ui,sans-serif!important}.pick .sc b{font-size:15px!important}
+.chips b{font-size:13px!important}.take{font-size:13.5px!important}
+table{font-size:12px!important}th,td{padding:6px 4px!important}
+.tabs{margin-bottom:6px!important}.tabs label{font-size:13px!important;padding:7px 10px!important}
+.bar .lab,.bar .num{font-size:12px!important}
+.tabhint,footer{display:none!important}
+</style>"""
+
+
+def embed(page: str) -> str:
+    return page.replace("</head>", EMBED_STYLE + "</head>", 1)
+
+
 def app_csp(origin: str) -> str:
     ws = origin.replace("https://", "wss://").replace("http://", "ws://")
     return ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
@@ -295,10 +322,14 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
 
     def report(r):
         page, _caption = _report_html(" ".join(x for x in (r.query_params.get("source"), r.query_params.get("since")) if x))
+        if r.query_params.get("embed") == "1":
+            page = embed(page)
         return HTMLResponse(page, headers={"Content-Security-Policy": EMBED_CSP, "X-Frame-Options": "SAMEORIGIN"})
 
-    def screener(_r):
+    def screener(r):
         page, _summary = _screener_html()
+        if r.query_params.get("embed") == "1":
+            page = embed(page)
         return HTMLResponse(page, headers={"Content-Security-Policy": EMBED_CSP, "X-Frame-Options": "SAMEORIGIN"})
 
     csp = app_csp(store.origin)

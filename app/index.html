@@ -3,11 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#f7f6f3" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#14161a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="AngelBot">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no">
 <title>AngelBot</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -17,8 +19,8 @@
 <body>
 <div id="app">
   <header class="top">
-    <div class="brand"><img src="/icon.svg" alt="" width="26" height="26"><span>AngelBot</span></div>
-    <span id="conn" class="pill off" title="Live connection">connecting</span>
+    <div class="brand"><img src="/icon.svg" alt=""><span id="title">AngelBot</span></div>
+    <div class="hdr-r"><span id="conn" class="pill off" title="Live connection">connecting</span><span id="hdr-action"></span></div>
   </header>
 
   <main id="view" aria-live="polite">
@@ -26,12 +28,12 @@
   </main>
 
   <nav id="tabs" class="tabs" hidden>
-    <button data-tab="home" class="on"><span class="ic">◉</span><span>Home</span></button>
-    <button data-tab="trades"><span class="ic">≡</span><span>Trades</span></button>
-    <button data-tab="screener"><span class="ic">⌕</span><span>Screener</span></button>
-    <button data-tab="report"><span class="ic">▤</span><span>Report</span></button>
-    <button data-tab="alerts"><span class="ic">!</span><span>Alerts</span></button>
-    <button data-tab="settings"><span class="ic">⚙</span><span>Settings</span></button>
+    <button data-tab="home" data-icon="home" class="on"><span>Home</span></button>
+    <button data-tab="trades" data-icon="trades"><span>Trades</span></button>
+    <button data-tab="screener" data-icon="screener"><span>Screener</span></button>
+    <button data-tab="report" data-icon="report"><span>Report</span></button>
+    <button data-tab="alerts" data-icon="alerts"><span>Alerts</span></button>
+    <button data-tab="settings" data-icon="settings"><span>Settings</span></button>
   </nav>
 
   <div id="toast" class="toast" role="status" hidden></div>

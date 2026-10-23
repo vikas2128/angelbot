@@ -45,8 +45,8 @@ def test_no_inline_code_no_outside_resources_no_html_injection():
     for bad in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "style:"):
         assert bad not in js, bad
     for name in ("index.html", "app.js", "app.css", "sw.js", "manifest.webmanifest"):
-        urls = set(re.findall(r"https?://[^\s'\"`)]+", (API.APP_DIR / name).read_text()))
-        assert not urls, (name, urls)                                            # nothing loaded from outside
+        urls = set(re.findall(r"https?://[^\s'\"`)]+", (API.APP_DIR / name).read_text())) - {"http://www.w3.org/2000/svg"}
+        assert not urls, (name, urls)                     # nothing loaded from outside (the SVG namespace is only a name)
 
 
 def test_manifest_and_icons_are_installable():

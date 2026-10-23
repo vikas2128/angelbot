@@ -1,7 +1,7 @@
 // Service worker: keeps the app's own screens for when the VM is out of reach, so the app opens and says so.
 // It never stores or answers data: /api, /auth and /ws always go to the server, live.
 'use strict';
-const CACHE = 'angelbot-shell-v2';
+const CACHE = 'angelbot-shell-v3';
 const SHELL = ['/', '/app.js', '/app.css', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', ev => {
