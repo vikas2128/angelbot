@@ -1,7 +1,7 @@
 # Build plan: AngelBot app (installable web app + private API over Tailscale)
 
-Status: **phases 0 to 4 built** (shared actions, alert outbox, read-only API, passkey login, actions); phases 5 to 7
-not built.
+Status: **phases 0 to 5 built** (shared actions, alert outbox, read-only API, passkey login, actions, app screens);
+phases 6 (push) and 7 (deploy) not built.
 The API is not installed as a service yet. Telegram stays on as the backup alert and control channel.
 
 Built so far:
@@ -21,6 +21,14 @@ Built so far:
   `/kill/ask` then `/kill/confirm` with the returned token within 60 seconds (one try), `/restart` (paper only, the same
   refusals as Telegram), `/api/settings/set` (`{"id", "choice"}` or `{"id", "amount"}`) and `/api/settings/reset`.
   Telegram is told about an emergency stop or a restart from the app.
+- App screens (phase 5) in `app/`, served by the API without login (no data in them) under a strict policy (scripts
+  and styles only from the server, nothing inline or from outside): sign-in and registration with passkeys; Home (status,
+  P&L, position, strategy state, controls), Trades (by day), Screener and Report (the server's pages, shown framed; they
+  are sent with a no-scripts policy), Alerts, Settings (choices, typed amount, reset, devices, sign out). Live status over
+  the WebSocket, polling every 5 s if it drops. Install manifest, icons, and a service worker that keeps only the screens
+  (never data) so the app opens and says so when the VM is out of reach. All text is set with textContent.
+  Checked in a phone-size browser with sample data; passkeys themselves still need a real phone.
+- `tests/test_api_real_server.py` runs the API under real uvicorn over the network (WebSocket and report included).
 - Tests use a software passkey that signs real WebAuthn responses, so the library's verification runs in full.
 
 ## 1. Goal

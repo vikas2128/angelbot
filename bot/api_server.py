@@ -65,6 +65,23 @@ SECURITY_HEADERS = {
     "Cache-Control": "no-store",
     "Cross-Origin-Resource-Policy": "same-origin",
 }
+APP_DIR = C.ROOT / "app"
+# the web app's files: (file, content type). Served without login: they hold no data, only the screens.
+STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+          "/app.css": ("app.css", "text/css; charset=utf-8"),
+          "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
+          "/sw.js": ("sw.js", "text/javascript; charset=utf-8"), "/icon.svg": ("icon.svg", "image/svg+xml"),
+          "/icon-192.png": ("icon-192.png", "image/png"), "/icon-512.png": ("icon-512.png", "image/png"),
+          "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png")}
+# report and screener pages are shown inside the app: their own inline styles only, no scripts, framed by the app only
+EMBED_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'self'; base-uri 'none'"
+
+
+def app_csp(origin: str) -> str:
+    ws = origin.replace("https://", "wss://").replace("http://", "ws://")
+    return ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            f"connect-src 'self' {ws}; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; "
+            "object-src 'none'; manifest-src 'self'; worker-src 'self'")
 
 
 class StartupError(SystemExit):
@@ -186,7 +203,9 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
         return True
 
     def secure(resp: Response) -> Response:
-        resp.headers.update(SECURITY_HEADERS)
+        for k, v in SECURITY_HEADERS.items():          # a route may set its own policy (the app, embedded pages)
+            if k not in resp.headers:
+                resp.headers[k] = v
         if tls:
             resp.headers["Strict-Transport-Security"] = "max-age=31536000"
         return resp
@@ -272,12 +291,23 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
         return JSONResponse({"alerts": alerts.read(r.query_params.get("since"), int(limit))})
 
     def report(r):
-        page, caption = _report_html(" ".join(x for x in (r.query_params.get("source"), r.query_params.get("since")) if x))
-        return HTMLResponse(page, headers={"X-Caption": re.sub(r"[^\x20-\x7e]", "", caption)[:200]})
+        page, _caption = _report_html(" ".join(x for x in (r.query_params.get("source"), r.query_params.get("since")) if x))
+        return HTMLResponse(page, headers={"Content-Security-Policy": EMBED_CSP, "X-Frame-Options": "SAMEORIGIN"})
 
     def screener(_r):
         page, _summary = _screener_html()
-        return HTMLResponse(page)
+        return HTMLResponse(page, headers={"Content-Security-Policy": EMBED_CSP, "X-Frame-Options": "SAMEORIGIN"})
+
+    csp = app_csp(store.origin)
+
+    async def static(request: Request):
+        name, ctype = STATIC[request.url.path]
+        try:
+            body = (APP_DIR / name).read_bytes()
+        except FileNotFoundError:
+            return err("not found", 404)
+        return secure(Response(body, media_type=ctype, headers={"Content-Security-Policy": csp,
+                                                                 "Cache-Control": "no-cache"}))
 
     def devices(_r):
         return JSONResponse({"devices": store.device_list()})
@@ -416,7 +446,8 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
             return
 
     cred = ("id", "credential")
-    routes = [Route("/healthz", health), Route("/auth/me", me),
+    routes = [*[Route(path, static) for path in STATIC],
+              Route("/healthz", health), Route("/auth/me", me),
               Route("/auth/register/options", auth_post(reg_options, allowed=("code",)), methods=["POST"]),
               Route("/auth/register/verify", auth_post(reg_verify, allowed=cred), methods=["POST"]),
               Route("/auth/login/options", auth_post(login_options), methods=["POST"]),
