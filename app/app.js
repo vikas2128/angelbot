@@ -30,6 +30,7 @@ const ICONS = {
   stop: 'M8.5 3h7L21 8.5v7L15.5 21h-7L3 15.5v-7zM9 12h6',
   refresh: 'M20 12a8 8 0 1 1-2.34-5.66M20 4v4.5h-4.5',
   chevron: 'M9 6l6 6-6 6',
+  down: 'M6 9l6 6 6-6',
   left: 'M15 6l-6 6 6 6',
   right: 'M9 6l6 6-6 6',
   bell: 'M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 21h4',
@@ -250,12 +251,8 @@ function renderHome() {
   const feed = s.feed || {};
   if (alive && feed.connected === false) flags.push(h('div', { class: 'banner bad', text: 'Price feed is disconnected' }));
   const pos = s.positions || [];
-  const posCard = h('div', { class: 'card' },
-    h('div', { class: 'row' }, h('h2', { class: 'm0', text: 'Position' }), pos.length ? h('span', { class: 'pill plain', text: pos.map(p => p.symbol).join(', ') }) : null),
-    pos.length ? pos.map(p => h('div', { class: 'grid2 mt8' },
-      stat('Shares', `${p.qty} @ ${price(p.avg)}`), stat('Now', `${price(p.ltp)}`),
-      stat('Open P&L', inr(p.unrealized), cls(p.unrealized)), stat('Stop / target', `${price(p.stop)} / ${price(p.target)}`)))
-      : h('p', { class: 'muted m0 mt8 small', text: 'No open position' }));
+  const posCards = pos.length ? pos.map(p => positionCard(p, s)) : [h('div', { class: 'card' },
+    h('h2', { class: 'm0', text: 'Position' }), h('p', { class: 'muted m0 mt8 small', text: 'No open position' }))];
   const strat = Object.entries(s.strategy_state || {});
   const ltp = Object.entries(s.ltp || {}).map(([k, v]) => `${k.replace(/-EQ$/, '')} ${price(v)}`).join(' · ');
   const stratCard = h('div', { class: 'card' },
@@ -280,7 +277,125 @@ function renderHome() {
       await act('/api/control/kill/confirm', { confirm: ask.confirm }); toast('Emergency stop set'); refreshStatus();
     })),
     h('p', { class: 'hint', text: 'Actions ask for Face ID if your last check is over 2 minutes old. Stop is the emergency stop.' }));
-  view.replaceChildren(hero, ...flags, posCard, stratCard, controls);
+  view.replaceChildren(hero, ...flags, ...posCards, stratCard, controls);
+}
+// ───────────────────────────── position card with its candle chart ─────────────────────────────
+const chart = { open: new Set(), bars: {}, minute: {}, range: '1h', pick: {}, loading: new Set() };
+const RANGES = [['30m', 30], ['1h', 60], ['Day', 1e9]];
+function svgEl(tag, attrs = {}, ...kids) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) el.setAttribute(k, String(v));
+  el.append(...kids);
+  return el;
+}
+function emaSeries(vals, n) {                     // same as the bot: seeded with the average of the first n closes
+  const k = 2 / (n + 1), out = []; let e = null;
+  vals.forEach((v, i) => {
+    if (i < n - 1) { out.push(null); return; }
+    e = e === null ? vals.slice(0, n).reduce((a, b) => a + b, 0) / n : v * k + e * (1 - k);
+    out.push(e);
+  });
+  return out;
+}
+function strategyParams(desc) {                   // "ema_cross(fast=9, slow=21)" -> {name, fast: 9, slow: 21}
+  const m = String(desc || '').match(/^(\w+)\((.*)\)$/), out = { name: m ? m[1] : String(desc || '') };
+  if (m) for (const kv of m[2].split(',')) { const [k, v] = kv.split('=').map(x => x.trim()); if (k) out[k] = isNaN(v) ? v : Number(v); }
+  return out;
+}
+async function loadBars(sym, s) {
+  const minute = String(s.now || '').slice(0, 16);
+  if (chart.loading.has(sym) || (chart.bars[sym] && chart.minute[sym] === minute)) return;
+  chart.loading.add(sym);
+  try {
+    const d = await get('/api/bars?symbol=' + encodeURIComponent(sym));
+    chart.bars[sym] = d.bars.map(([t, o, hi, lo, c]) => ({ t, o, h: hi, l: lo, c }));
+  } catch (_) { chart.bars[sym] = chart.bars[sym] || []; }
+  chart.minute[sym] = minute;                     // success or not: try again only when the next minute starts
+  chart.loading.delete(sym);
+  if (state.tab === 'home') renderHome();
+}
+function liveBars(bars, ltp, nowIso) {            // add the forming candle from the latest price
+  if (!bars.length || ltp == null) return bars;
+  const out = bars.slice(), last = out[out.length - 1], m = String(nowIso || '').slice(0, 16);
+  if (m && m > String(last.t).slice(0, 16)) out.push({ t: m + ':00', o: last.c, h: Math.max(last.c, ltp), l: Math.min(last.c, ltp), c: ltp, live: true });
+  return out;
+}
+function drawChart(p, s) {
+  const sym = p.symbol, all = liveBars(chart.bars[sym] || [], p.ltp, s.now);
+  const box = h('div', { class: 'chartbox' });
+  const chips = h('div', { class: 'choices tight' }, RANGES.map(([name]) => h('button', { class: 'chip' + (chart.range === name ? ' on' : ''), text: name,
+    onclick: ev => { ev.stopPropagation(); chart.range = name; chart.pick = {}; renderHome(); } })));
+  if (!all.length) { box.append(chips, h('p', { class: 'muted small m0', text: chart.loading.has(sym) ? 'Loading candles…' : 'No candles yet today.' })); return box; }
+  const n = RANGES.find(r => r[0] === chart.range)[1], start = Math.max(0, all.length - n), bars = all.slice(start);
+  const st = (s.strategy_state || {})[sym] || {}, sp = strategyParams((s.strategies || {})[sym] || s.strategy);
+  const closesAll = all.map(b => b.c);
+  const series = [];
+  if (sp.name === 'ema_cross' && sp.fast && sp.slow) {
+    series.push(['ema-f', emaSeries(closesAll, sp.fast).slice(start), `${sp.fast}-min avg`], ['ema-s', emaSeries(closesAll, sp.slow).slice(start), `${sp.slow}-min avg`]);
+  }
+  const levels = [['ln-entry', p.avg, 'Entry'], ['ln-stop', p.stop, 'Stop'], ['ln-tgt', p.target, 'Target']];
+  if ('range_high' in st) levels.push(['ln-lvl', st.range_high, 'Range high'], ['ln-lvl', st.range_low, 'Range low']);
+  if ('vwap' in st) levels.push(['ln-lvl', st.vwap, 'VWAP'], ['ln-lvl', st.buy_below, 'Buy below'], ['ln-lvl', st.sell_above, 'Sell above']);
+  const vals = bars.flatMap(b => [b.h, b.l]).concat(levels.map(l => l[1]).filter(v => v != null), series.flatMap(x => x[1]).filter(v => v != null));
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo || hi * 0.002) * 0.08; lo -= pad; hi += pad;
+  const W = Math.max(280, Math.round(($('#view').clientWidth || 360) - 28)), H = 220, R = 54, B = 18, T = 6, pw = W - R, ph = H - T - B;
+  const x = i => (i + 0.5) * (pw / bars.length), y = v => T + (hi - v) / (hi - lo) * ph, cw = Math.max(1, pw / bars.length * 0.66);
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': `${sym} 1-minute candles` });
+  const last = bars[bars.length - 1];
+  const shown = levels.filter(([, v]) => v != null && v >= lo && v <= hi);
+  const taken = shown.map(([, v]) => y(v)).concat([y(last.c)]);   // right-axis spots used by lines and the last price
+  for (let g = 0; g <= 3; g++) {                  // price grid (its label only where nothing else is printed)
+    const v = lo + (hi - lo) * (g + 0.5) / 4.0, yy = y(v);
+    svg.append(svgEl('line', { x1: 0, x2: pw, y1: yy, y2: yy, class: 'grid' }));
+    if (taken.every(t => Math.abs(t - yy) > 12)) svg.append(svgEl('text', { x: pw + 4, y: yy + 3, class: 'ax' }, v.toFixed(2)));
+  }
+  bars.forEach((b, i) => {                        // candles
+    const up = b.c >= b.o, k = (up ? 'c-up' : 'c-dn') + (b.live ? ' live' : '');
+    svg.append(svgEl('line', { x1: x(i), x2: x(i), y1: y(b.h), y2: y(b.l), class: 'wick ' + k }),
+      svgEl('rect', { x: x(i) - cw / 2, y: y(Math.max(b.o, b.c)), width: cw, height: Math.max(1, Math.abs(y(b.o) - y(b.c))), class: 'body ' + k }));
+  });
+  for (const [k, vs] of series) {                 // strategy averages
+    const pts = vs.map((v, i) => v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`).filter(Boolean).join(' ');
+    if (pts) svg.append(svgEl('polyline', { points: pts, class: k }));
+  }
+  for (const [k, v, label] of shown) {            // entry / stop / target and strategy levels: name inside, price on the axis
+    const yy = y(v), above = yy > T + 12;
+    svg.append(svgEl('line', { x1: 0, x2: pw, y1: yy, y2: yy, class: k }),
+      svgEl('text', { x: 4, y: above ? yy - 3 : yy + 11, class: 'tag ' + k }, label));
+    if (Math.abs(yy - y(last.c)) > 12) svg.append(svgEl('text', { x: pw + 4, y: yy + 3, class: 'tag ' + k }, v.toFixed(2)));
+  }
+  // last price marker
+  svg.append(svgEl('rect', { x: pw + 1, y: y(last.c) - 7, width: R - 2, height: 14, rx: 3, class: 'pricetag ' + (last.c >= last.o ? 'c-up' : 'c-dn') }),
+    svgEl('text', { x: pw + 5, y: y(last.c) + 3.5, class: 'pricetxt' }, last.c.toFixed(2)));
+  const ticks = [0, Math.floor((bars.length - 1) / 2), bars.length - 1];
+  for (const i of [...new Set(ticks)]) svg.append(svgEl('text', { x: Math.min(Math.max(x(i), 14), pw - 14), y: H - 4, class: 'ax mid' }, String(bars[i].t).slice(11, 16)));
+  const sel = chart.pick[sym];
+  if (sel != null && bars[sel]) svg.append(svgEl('line', { x1: x(sel), x2: x(sel), y1: T, y2: T + ph, class: 'cross' }));
+  const hit = svgEl('rect', { x: 0, y: 0, width: pw, height: H, class: 'hit' });
+  const pickAt = ev => { ev.stopPropagation(); const r = svg.getBoundingClientRect(); const i = Math.floor((ev.clientX - r.left) / r.width * W / (pw / bars.length));
+    chart.pick[sym] = Math.max(0, Math.min(bars.length - 1, i)); renderHome(); };
+  hit.addEventListener('click', pickAt);
+  svg.append(hit);
+  const b = bars[sel != null && bars[sel] ? sel : bars.length - 1];
+  const info = h('div', { class: 'chartinfo' }, h('span', { class: 'muted', text: String(b.t).slice(11, 16) + (b.live ? ' (forming)' : '') }),
+    ` O ${b.o.toFixed(2)}  H ${b.h.toFixed(2)}  L ${b.l.toFixed(2)}  C `, h('b', { class: b.c >= b.o ? 'up' : 'dn', text: b.c.toFixed(2) }));
+  const legend = h('div', { class: 'legend' }, h('span', { class: 'k ln-entry', text: 'Entry' }), h('span', { class: 'k ln-stop', text: 'Stop' }),
+    h('span', { class: 'k ln-tgt', text: 'Target' }), series.map(([k, , label]) => h('span', { class: 'k ' + k, text: label })));
+  box.append(chips, info, svg, legend);
+  return box;
+}
+function positionCard(p, s) {
+  const open = chart.open.has(p.symbol);
+  if (open) loadBars(p.symbol, s);
+  const head = h('button', { class: 'cardhead', 'aria-expanded': open ? 'true' : 'false', onclick: () => {
+    open ? chart.open.delete(p.symbol) : chart.open.add(p.symbol); chart.pick = {}; renderHome(); } },
+    h('h2', { class: 'm0', text: 'Position' }), h('span', { class: 'row' }, h('span', { class: 'pill plain', text: p.symbol }), icon(open ? 'down' : 'chevron')));
+  return h('div', { class: 'card' }, head,
+    h('div', { class: 'grid2 mt8' },
+      stat('Shares', `${p.qty} @ ${price(p.avg)}`), stat('Now', `${price(p.ltp)}`),
+      stat('Open P&L', inr(p.unrealized), cls(p.unrealized)), stat('Stop / target', `${price(p.stop)} / ${price(p.target)}`)),
+    open ? drawChart(p, s) : h('p', { class: 'hint', text: 'Tap for the candle chart' }));
 }
 async function refreshStatus() { try { state.status = await get('/api/status'); renderHome(); } catch (_) {} }
 

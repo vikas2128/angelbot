@@ -18,6 +18,7 @@ CONTROL = RUNTIME_DIR / "control.json"
 STATUS = RUNTIME_DIR / "status.json"
 JOURNAL = RUNTIME_DIR / "journal.db"
 SCREEN = RUNTIME_DIR / "screen.json"
+BARS = RUNTIME_DIR / "bars.json"                       # bot -> app: today's 1-minute bars per traded stock (charts only)
 SEL_REQUEST = RUNTIME_DIR / "selection_request.json"   # bot -> Telegram: today's picks and whether it is still waiting
 SEL_CHOICE = RUNTIME_DIR / "selection_choice.json"     # Telegram -> bot: what you tapped
 SEL_STATE = RUNTIME_DIR / "selection_state.json"       # what the bot decided today (reused after a restart)

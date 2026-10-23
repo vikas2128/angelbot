@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 from bot import messages, notify, sizing
 from bot.bars import BarBuilder
-from bot.control import read_control, set_control, write_status
+from bot.control import BARS, read_control, set_control, write_json, write_status
 from bot.journal import Journal, trades_on
 from bot.models import Bar, Instrument, Tick
 from bot.orders import OrderManager
@@ -109,6 +109,7 @@ class Engine:
         if bars and bar.start.date() != bars[-1].start.date():
             bars.clear()
         bars.append(bar)
+        self._write_bars()
         pos = self.om.positions[inst.symbol]
         try:
             desired = self.strategies[inst.symbol].on_bar(bars, pos.side)
@@ -353,6 +354,21 @@ class Engine:
         for sym, bars in bars_by_symbol.items():
             self.bars_today[sym] = list(bars)
             log.info("prefilled %d bars for %s", len(bars), sym)
+        self._write_bars()
+
+    def _write_bars(self) -> None:
+        """Today's bars for the app's charts (display only: a failure here never stops the bot; not in replays)."""
+        if self.replay:
+            return
+        try:
+            day = self.now().strftime("%Y-%m-%d")
+            tf = int(self.cfg["strategy"].get("timeframe_min", 1))
+            write_json(BARS, {"date": day, "timeframe_min": tf, "bars": {
+                sym: [[b.start.isoformat(), b.open, b.high, b.low, b.close, b.volume]
+                      for b in bars if b.start.strftime("%Y-%m-%d") == day]
+                for sym, bars in self.bars_today.items()}})
+        except Exception as e:
+            log.warning("could not write bars for the app: %s", e)
 
     def run(self) -> int:
         self.state = "running"

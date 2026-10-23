@@ -172,6 +172,22 @@ def _totals(rows: list[dict]) -> dict:
             "win_rate_pct": round(100 * wins / len(rows), 1) if rows else 0.0}
 
 
+_SYMBOL = re.compile(r"^[A-Z0-9&-]{1,30}$")
+
+
+def bars_payload(symbol: str | None) -> dict:
+    """Today's 1-minute bars the bot built for one stock it trades today (from runtime/<area>/bars.json)."""
+    symbol = str(symbol or "")
+    if not _SYMBOL.match(symbol):
+        raise BadRequest("symbol must look like SBIN-EQ")
+    data = control.read_json(control.BARS)
+    today = now_ist().strftime("%Y-%m-%d")
+    if data.get("date") != today or symbol not in (data.get("bars") or {}):
+        raise ValueError(f"no bars for {symbol} today")
+    return {"symbol": symbol, "date": today, "timeframe_min": data.get("timeframe_min", 1),
+            "bars": data["bars"][symbol][-400:]}
+
+
 def settings_payload() -> dict:
     cfg = ST.load()
     vals = ST.overrides()
@@ -313,6 +329,9 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
 
     def settings(_r):
         return JSONResponse(settings_payload())
+
+    def bars(r):
+        return JSONResponse(bars_payload(r.query_params.get("symbol")))
 
     def alerts_(r):
         limit = r.query_params.get("limit", "50")
@@ -537,6 +556,7 @@ def create_app(store: AuthStore, tls: bool = True, restart_runner=subprocess.run
                                                       allowed=("id",)), methods=["POST"]),
               Route("/api/status", endpoint(status)), Route("/api/trades", endpoint(trades)),
               Route("/api/settings", endpoint(settings)), Route("/api/alerts", endpoint(alerts_)),
+              Route("/api/bars", endpoint(bars)),
               Route("/api/report", endpoint(report)), Route("/api/screener", endpoint(screener)),
               *[Route(path, auth_post(act(fn), need_session=True, need_stepup=True, allowed=allowed), methods=["POST"])
                 for path, fn, allowed in (

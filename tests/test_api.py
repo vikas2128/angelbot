@@ -65,7 +65,7 @@ def test_route_inventory_no_order_or_live_routes(client):
     switch paper/live or touch secrets."""
     app = API.create_app(AA.AuthStore(RP, ORIGIN, folder=None, notify_fn=lambda t: None))
     paths = {r.path for r in app.routes}
-    data = {"/api/status", "/api/trades", "/api/settings", "/api/alerts", "/api/report", "/api/screener"}
+    data = {"/api/status", "/api/trades", "/api/settings", "/api/alerts", "/api/report", "/api/screener", "/api/bars"}
     actions = {"/api/control/pause", "/api/control/resume", "/api/control/kill/ask", "/api/control/kill/confirm",
                "/api/control/restart", "/api/settings/set", "/api/settings/reset"}
     auth = {"/auth/me", "/auth/register/options", "/auth/register/verify", "/auth/login/options", "/auth/login/verify",
