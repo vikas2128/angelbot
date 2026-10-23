@@ -18,6 +18,9 @@ function h(tag, attrs = {}, ...kids) {
 }
 // line icons, drawn here (24x24, stroke): no icon font, no outside files
 const ICONS = {
+  warn: 'M12 3.5 2.5 20h19zM12 10v4.5M12 17.2h.01',
+  trend: 'M3 17l6-6 4 4 8-8M15 7h6v6',
+  trenddown: 'M3 7l6 6 4-4 8 8M15 17h6v-6',
   home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
   trades: 'M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01',
   screener: 'M3 5h18l-7 8.5V19l-4 2v-7.5z',
@@ -617,18 +620,63 @@ async function renderFrame(path, emptyHint) {
 }
 
 // ───────────────────────────── alerts ─────────────────────────────
+// an alert's kind from its leading emoji (the same text Telegram gets); the app draws its own icon instead
+const ALERT_KINDS = [
+  ['trade', 'Trades', 'trend', ['🟢', '✅', '🔻', '➖', '♻️']],
+  ['problem', 'Problems', 'warn', ['❗', '⚠️', '🚨', '⛔']],
+  ['security', 'Security', 'key', ['🔐']],
+  ['bot', 'Bot', 'bell', []]];
+const alertView = { kind: 'all', open: new Set() };
+const unescapeHtml = t => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, '&');
+function alertParts(a) {
+  const text = String(a.text || '').trim();
+  let kind = ALERT_KINDS.find(k => k[3].some(e => text.startsWith(e)))?.[0] || 'bot';
+  if (text.startsWith('📡')) kind = /is back/.test(text) ? 'bot' : 'problem';
+  const m = /<b>([\s\S]*?)<\/b>/.exec(String(a.html || ''));
+  const title = m ? unescapeHtml(m[1].replace(/<[^>]*>/g, '')).trim() : text.split('\n')[0].replace(/^\S+\s/, '');
+  const at = text.indexOf(title);
+  const body = (at >= 0 ? text.slice(at + title.length) : text).replace(/^[\s:.·-]+/, '').trim();
+  // a closed trade's icon is red for a loss and green for a profit; an entry or pick-up stays neutral
+  const tone = text.startsWith('🔻') ? 'dn' : text.startsWith('✅') ? 'up' : '';
+  return { kind, tone, title, body, live: /LIVE/.test(a.label || '') };
+}
 async function renderAlerts() {
   const view = $('#view');
   view.replaceChildren(h('p', { class: 'muted center', text: 'Loading…' }));
   let d;
   try { d = await get('/api/alerts?limit=100'); } catch (e) { view.replaceChildren(h('div', { class: 'banner', text: e.message })); return; }
-  const items = d.alerts.slice().reverse();
   setAction(h('button', { class: 'iconbtn', 'aria-label': 'Refresh', onclick: () => renderAlerts() }, icon('refresh')));
-  view.replaceChildren(h('div', { class: 'card' }, h('h2', { text: 'Recent alerts' }),
-    items.length ? h('div', { class: 'list' }, items.map(a => h('div', { class: 'item' },
-      h('div', { class: 't', text: `${String(a.ts).slice(5, 16).replace('T', ' ')} · ${a.label || ''}` }),
-      h('div', { class: 'x pre', text: a.text }))))
-      : h('p', { class: 'muted', text: 'No alerts yet.' })));
+  alertView.items = d.alerts.slice().reverse().map(a => ({ ...a, ...alertParts(a) }));
+  drawAlerts();
+}
+function drawAlerts() {
+  const view = $('#view'), all = alertView.items || [];
+  const count = k => all.filter(a => a.kind === k).length;
+  const chips = h('div', { class: 'choices tight oneline' },
+    [['all', 'All', all.length], ...ALERT_KINDS.map(([k, label]) => [k, label, count(k)])].filter(([k, , n]) => k === 'all' || n)
+      .map(([k, label, n]) => h('button', { class: 'chip' + (alertView.kind === k ? ' on' : ''), text: `${label} ${n}`,
+        onclick: () => { alertView.kind = k; drawAlerts(); } })));
+  const shown = all.filter(a => alertView.kind === 'all' || a.kind === alertView.kind);
+  const days = [];
+  for (const a of shown) {
+    const day = String(a.ts).slice(0, 10);
+    if (!days.length || days[days.length - 1].day !== day) days.push({ day, items: [] });
+    days[days.length - 1].items.push(a);
+  }
+  const row = a => {
+    const key = a.ts + a.title, open = alertView.open.has(key), long = a.body.length > 110;
+    const kind = ALERT_KINDS.find(k => k[0] === a.kind);
+    return h('div', { class: 'arow' + (long ? ' tap' : ''), onclick: long ? () => { open ? alertView.open.delete(key) : alertView.open.add(key); drawAlerts(); } : null },
+      h('span', { class: 'aico ' + a.kind + (a.tone ? ' ' + a.tone : '') }, icon(a.tone === 'dn' ? 'trenddown' : kind[2], 'i')),
+      h('div', { class: 'amain' },
+        h('div', { class: 'aline' }, h('b', { text: a.title }), a.live ? h('span', { class: 'tag sell', text: 'LIVE' }) : null,
+          h('span', { class: 'grow' }), h('span', { class: 'small muted nw', text: hhmm(a.ts) })),
+        a.body ? h('div', { class: 'abody pre' + (long && !open ? ' clamp' : ''), text: a.body }) : null));
+  };
+  const body = shown.length ? days.map(g => h('div', { class: 'card' },
+      h('h2', { text: dayName(g.day).replace(/^./, c => c.toUpperCase()) }), h('div', { class: 'alist' }, g.items.map(row))))
+    : [h('div', { class: 'card' }, h('p', { class: 'muted m0 small', text: all.length ? 'No alerts of this kind.' : 'No alerts yet. Trades, problems and sign-ins show up here.' }))];
+  view.replaceChildren(all.length ? chips : '', ...body);
 }
 
 // ───────────────────────────── push notifications ─────────────────────────────
