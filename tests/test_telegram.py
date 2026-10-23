@@ -241,7 +241,7 @@ def test_screen_file_from_the_latest_snapshot(tmp_path, monkeypatch):
     out = tmp_path / "out"; out.mkdir()
     path, text = build_screen_file(out)
     assert path.name == "angelbot-screener-2026-10-22.html" and "Stock screener" in path.read_text()
-    assert "HOT" in text and "Advisory only" in text and "not today" not in text
+    assert "HOT" in text and "places no orders" in text and "not today" not in text
     monkeypatch.setattr("bot.telegram_ctl.now_ist", lambda: datetime.fromisoformat("2026-10-23 09:30").replace(tzinfo=IST))
     assert "not today" in build_screen_file(out)[1]
 

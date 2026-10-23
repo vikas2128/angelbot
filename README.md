@@ -331,6 +331,13 @@ systemctl --user start angelbot-backtest@paper             # the same through sy
 journalctl --user -u angelbot-backtest@paper -n 80 --no-pager
 ```
 
+**Strategy comparison (information only).** The same nightly run also backtests every strategy (ema_cross, orb,
+vwap_revert) on each stock, with the same order size, exits and limits. The screener page gets a **Strategies** tab
+(totals per strategy: net after fees, trades, win rate, on how many stocks it made money, and a per-stock table),
+the Telegram summary lists the totals, and `backtest-stocks` prints them. It **never switches the strategy**: that
+stays your choice in ⚙️ Settings → Strategy. Before switching, confirm the better one on a later period it was not
+chosen on (`./deploy/ab research backtest SYMBOL --strategy orb --from ... --to ...`), then paper trade it.
+
 Be honest about what it shows: 30 days is a few dozen trades per stock, and picking the stocks that did well last
 month is choosing on past data. It filters out stocks that clearly lose with this strategy; it does not prove a pick
 will make money. Judge it by comparing paper results with and without the check over several weeks.

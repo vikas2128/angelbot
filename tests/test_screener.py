@@ -182,7 +182,7 @@ def test_report_html_escapes_and_handles_no_eligible_stocks():
 def test_summary_message_flags_a_stale_snapshot():
     snap = _snap()
     fresh = summary_html(snap, "2026-10-22")
-    assert "HOT" in fresh and "Advisory only" in fresh and "not today" not in fresh
+    assert "HOT" in fresh and "places no orders" in fresh and "not today" not in fresh
     assert "from 2026-10-22, not today" in summary_html(snap, "2026-10-23")
 
 

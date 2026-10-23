@@ -188,6 +188,9 @@ def render_html(snap: dict) -> str:
     if bad:
         items = "".join(f"<li><b>{esc(_name(r['symbol']))}</b>{_tags(r)}: {esc('; '.join(r['excluded']))}</li>" for r in bad)
         tabs.append(("out", f"Left out ({len(bad)})", "These failed a gate, so they are not scored", f'<ul class="plain">{items}</ul>'))
+    sc = snap.get("strategy_compare")
+    if sc and sc.get("totals"):
+        tabs.append(("strat", "Strategies", strategy_note(sc), strategy_tables(sc)))
     tab_css = "".join(
         f"#st-{k}:checked~.tabs label[for=st-{k}]{{color:var(--fg);border-bottom-color:var(--accent)}}"
         f"#st-{k}:focus-visible~.tabs label[for=st-{k}]{{outline:2px solid var(--accent);outline-offset:-2px}}"
@@ -209,10 +212,46 @@ def render_html(snap: dict) -> str:
             f'<header><h1>Stock screener</h1><p class="sub">{esc(date_label(snap))} · checked {snap["universe"]} stocks · '
             f'{snap["eligible"]} passed the gates · built {esc(gen[11:16])} IST</p>'
             f'<p class="sub">Screened: {esc(lists_text(snap))}</p></header>'
-            '<div class="banner"><i></i><span>Advisory only. The bot trades just the stocks listed in its config, and this ranking changes '
-            'nothing there. The score is a heuristic that has not been backtested: use it to shortlist stocks to test, not as a signal.</span></div>'
+            '<div class="banner"><i></i><span>Advisory only: the screener places no orders. With morning selection on, the bot '
+            'trades the top pick that passed the gates; otherwise just the stocks in its config. The score is a heuristic that has not been backtested: use it to shortlist stocks to test, not as a signal.</span></div>'
             f'<section><div class="picks">{cards}</div></section>{tabs_html}{errs}{how}'
             '<footer>Read-only analytics from market data. No orders are placed by the screener.</footer></div></body></html>')
+
+
+def strategy_note(sc: dict) -> str:
+    when = str(sc.get("run_at", ""))[:16].replace("T", " ")
+    note = (f"Each strategy backtested on every stock over the last {sc.get('days')} days (run {when} IST), same order "
+            f"size, exits and limits. Information only: the bot keeps using {sc['current']} until you change it in "
+            "Settings. Last month's best need not be next month's: confirm on a later period before switching.")
+    if sc.get("note"):
+        note += f" Note: {sc['note']}."
+    return note
+
+
+def strategy_tables(sc: dict) -> str:
+    names = [t["strategy"] for t in sc["totals"]]
+    cur = sc["current"]
+    tot = "".join(
+        f'<tr><td>{esc(t["strategy"])}{" <b>(in use)</b>" if t["strategy"] == cur else ""}</td>'
+        f'<td class="r {"up" if t["net_pnl"] > 0 else "dn" if t["net_pnl"] < 0 else ""}">{esc(_money(t["net_pnl"]))}</td>'
+        f'<td class="r">{t["trades"]}</td><td class="r">{t["win_rate_pct"]:g}%</td>'
+        f'<td class="r">{t["stocks_up"]} of {t["stocks"]}</td><td class="r hide-s">{esc(_money(-t["charges"]) if t["charges"] else DASH)}</td></tr>'
+        for t in sc["totals"])
+    head = "".join(f'<th class="r">{esc(n)}</th>' for n in names)
+    body = ""
+    for sym, per in sorted(sc["by_stock"].items(), key=lambda kv: -float((kv[1].get(cur) or {}).get("net_pnl") or 0)):
+        cells = ""
+        for n in names:
+            r = per.get(n) or {}
+            v = r.get("net_pnl")
+            cls = "" if v is None else ("up" if v > 0 else "dn" if v < 0 else "")
+            cells += f'<td class="r {cls}">{esc(_money(v))}<br><span class="note">{esc(str(r.get("trades", DASH)))} trades</span></td>'
+        body += f"<tr><td>{esc(_name(sym))}</td>{cells}</tr>"
+    return ('<div class="scroll"><table><thead><tr><th>Strategy</th><th class="r">Net after fees</th><th class="r">Trades</th>'
+            '<th class="r">Win rate</th><th class="r">Stocks up</th><th class="r hide-s">Fees</th></tr></thead>'
+            f'<tbody>{tot}</tbody></table></div>'
+            '<p class="note">Per stock (net after fees, and trades)</p>'
+            f'<div class="scroll"><table><thead><tr><th>Stock</th>{head}</tr></thead><tbody>{body}</tbody></table></div>')
 
 
 def summary_html(snap: dict, today: str | None = None) -> str:
@@ -232,5 +271,14 @@ def summary_html(snap: dict, today: str | None = None) -> str:
         tags = "".join(f" [{esc(t)}]" for t in r.get("indices") or [])
         lines.append(f"{r['rank']}. <b>{esc(r['symbol'])}</b>{tags} · " + " · ".join(bits))
     lines.append(f"Checked {snap['universe']} stocks, {snap['eligible']} passed the gates.")
-    lines.append("Advisory only: the bot still trades just what is in its config.")
+    sc = snap.get("strategy_compare")
+    if sc and sc.get("totals"):
+        lines.append(f"Strategies, last {sc.get('days')} days on these stocks (information only, in use: {esc(sc['current'])}):")
+        for t in sc["totals"]:
+            mark = " ◀ in use" if t["strategy"] == sc["current"] else ""
+            lines.append(f"  {esc(t['strategy'])}: {esc(_money(t['net_pnl']))} · {t['trades']} trades · "
+                         f"{t['win_rate_pct']:g}% wins{mark}")
+        if sc.get("note"):
+            lines.append(f"  ⚠️ {esc(sc['note'])}")
+    lines.append("The screener places no orders. With morning selection on, the bot trades the top pick; otherwise its config list.")
     return "\n".join(lines)

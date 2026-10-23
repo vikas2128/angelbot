@@ -312,6 +312,10 @@ def cmd_backtest_stocks(args, cfg):
     for sym, r in rows:
         print(f"  {sym:<14} net {r['net_pnl']:>9.2f}  trades {r['trades']:>4}  win {r['win_rate_pct']:>5}%  "
               f"PF {r['profit_factor']}  maxDD {r['max_drawdown']}")
+    print(f"strategies over all stocks, last {snap['days']} days (information only; in use: {cfg['strategy']['name']}):")
+    for t in SB.totals(snap.get("compare") or {}):
+        print(f"  {t['strategy']:<12} net {t['net_pnl']:>10.2f}  trades {t['trades']:>5}  win {t['win_rate_pct']:>5}%  "
+              f"up on {t['stocks_up']} of {t['stocks']} stocks")
     for e in snap["errors"]:
         print("  problem:", e)
     print(f"saved {len(rows)} results -> {SB.path()}  (used by the screener's backtest check)")

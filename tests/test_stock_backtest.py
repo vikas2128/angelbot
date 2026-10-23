@@ -140,3 +140,57 @@ def test_cli_refuses_while_the_bot_runs(monkeypatch):
     with pytest.raises(SystemExit) as e:
         cli.main(["backtest-stocks"])
     assert "bot is running" in str(e.value)
+
+
+# ---------------------------------------------------------------- strategy comparison (information only)
+def test_every_strategy_is_backtested_on_the_same_candles(cfg):
+    from bot.strategies import STRATEGIES
+    snap = SB.run_all(cfg, None, [inst("A-EQ"), inst("B-EQ")], EVENING, fetch_fn=lambda *a: candles())
+    assert set(snap["compare"]) == {"A-EQ", "B-EQ"} and set(snap["compare"]["A-EQ"]) == set(STRATEGIES)
+    assert snap["results"]["A-EQ"] == snap["compare"]["A-EQ"][cfg["strategy"]["name"]]     # the gate uses the strategy in use
+
+
+def test_totals_add_up_across_stocks():
+    compare = {"A-EQ": {"x": {"trades": 10, "net_pnl": 30.0, "charges": 5.0, "win_rate_pct": 60.0},
+                        "y": {"trades": 4, "net_pnl": -10.0, "charges": 2.0, "win_rate_pct": 25.0}},
+               "B-EQ": {"x": {"trades": 10, "net_pnl": -50.0, "charges": 5.0, "win_rate_pct": 40.0},
+                        "y": {"trades": 0, "net_pnl": 0.0, "charges": 0.0, "win_rate_pct": 0.0}}}
+    t = {r["strategy"]: r for r in SB.totals(compare)}
+    assert t["x"] == {"strategy": "x", "stocks": 2, "trades": 20, "net_pnl": -20.0, "charges": 10.0,
+                      "win_rate_pct": 50.0, "stocks_up": 1}
+    assert t["y"]["net_pnl"] == -10.0 and t["y"]["stocks_up"] == 0
+    assert [r["strategy"] for r in SB.totals(compare)] == ["y", "x"]                     # best net first
+
+
+def test_comparison_survives_a_strategy_switch_but_flags_other_changes(cfg):
+    snap = SB.run_all(cfg, None, [inst("A-EQ")], EVENING, fetch_fn=lambda *a: candles())
+    SB.save(snap)
+    c = SB.comparison(cfg, NOW)
+    assert c["current"] == cfg["strategy"]["name"] and c["note"] == "" and len(c["totals"]) == 3
+    switched = copy.deepcopy(cfg)
+    switched["strategy"]["name"] = "orb"
+    assert SB.comparison(switched, NOW)["note"] == "" and SB.comparison(switched, NOW)["current"] == "orb"
+    wider = copy.deepcopy(cfg)
+    wider["exits"]["stop_loss_pct"] = 0.75
+    assert "last changed" in SB.comparison(wider, NOW)["note"]
+    assert "days old" in SB.comparison(cfg, EVENING + timedelta(days=6))["note"]
+    SB.path().unlink()
+    assert SB.comparison(cfg, NOW) is None
+
+
+def test_comparison_is_shown_and_never_changes_the_picks(cfg, monkeypatch):
+    from bot.instruments import load_master
+    cfg = copy.deepcopy(cfg)
+    cfg["screener"] = {"backtest_gate": False}
+    monkeypatch.setattr(screen_data, "collect", lambda broker, insts, now, lb, pause=1.0, progress=None:
+                        ([raw(i.symbol) for i in insts], []))
+    master = load_master(FIXTURE_MASTER)
+    before = screen_data.run_screen(cfg, None, master, NOW, ["SBIN-EQ", "INFY-EQ"])
+    assert before["strategy_compare"] is None and "Strategies" not in render_html(before)
+    SB.save(SB.run_all(cfg, None, [inst("SBIN-EQ"), inst("INFY-EQ", "2")], EVENING, fetch_fn=lambda *a: candles()))
+    after = screen_data.run_screen(cfg, None, master, NOW, ["SBIN-EQ", "INFY-EQ"])
+    assert after["picks"] == before["picks"]                                              # information only
+    page, msg = render_html(after), summary_html(after)
+    cur = cfg["strategy"]["name"]
+    assert "Strategies" in page and "(in use)" in page and "Information only" in page and "vwap_revert" in page
+    assert f"in use: {cur}" in msg and "◀ in use" in msg and msg.count(" trades · ") >= 3

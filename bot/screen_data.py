@@ -91,6 +91,8 @@ def run_screen(cfg: dict, broker, master: list[dict], now: datetime, universe: l
         for raw in raws:
             raw["bt"] = (results or {}).get(raw["symbol"])
     snap = screener.rank(raws, p, cfg.get("charges", {}), now, errors + errs)
+    from bot import stock_backtest as SB
+    snap["strategy_compare"] = SB.comparison(cfg, now)              # information only: never changes the strategy
     snap["lists"] = lists                                          # which index lists were screened, and how old they are
     for r in snap["rows"]:
         r["indices"] = member.get(r["symbol"], [])                 # e.g. ["N50", "BANK"]; empty for a hand-picked symbol
