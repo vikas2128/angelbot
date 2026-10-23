@@ -104,7 +104,9 @@ def test_amount_from_telegram_buttons_and_typed(clean_settings):
     assert "above risk.max_order_value" in route("/amount 900000")[0] and ST.load()["sizing"]["amount"] == 7500
     assert "Not a number" in route("/amount lots")[0]
     text, _ = route("/amount off")
-    assert "off (use the share counts)" in text and ST.overrides() == {}
+    base = float((ST.C.load_config().get("sizing") or {}).get("amount") or 0)
+    assert "off (use the share counts)" in text and ST.load()["sizing"]["amount"] == 0
+    assert ST.overrides() == ({} if base == 0 else {"sizing.amount": 0})
 
 
 # ---------------------------------------------------------------- edge cases

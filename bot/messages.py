@@ -71,6 +71,13 @@ def halt_reason(reason: str | None) -> str:
     return esc(r)
 
 
+def _looking_for(s: dict) -> str:
+    names = sorted({str(v).split("(")[0] for v in (s.get("strategies") or {}).values()})
+    if len(names) > 1:
+        return "a strategy per stock (" + ", ".join(strategy_name(n) for n in names) + ")"
+    return strategy_name(str(s.get("strategy") or "").split("(")[0])
+
+
 def strategy_name(name: str | None) -> str:
     return STRATEGIES.get(name or "", esc(name or "strategy"))
 
@@ -240,7 +247,7 @@ def status_card(s: dict, control: dict, configured_mode: str | None = None) -> s
     if s.get("replay"):
         head += " (replay)"
     lines = [head, mode_tag(s.get("mode")),
-             f"Looking for: {strategy_name(str(s.get('strategy') or '').split('(')[0])}",
+             f"Looking for: {_looking_for(s)}",
              f"Today: <b>{money(s.get('day_pnl'))}</b> after fees · {s.get('trades_today', 0)} trades"]
     positions = s.get("positions") or []
     if positions:
@@ -275,7 +282,7 @@ def _signed_pct(x) -> str:
 def strategy_state_lines(sym: str, st: dict, strategy: str | None = None) -> list[str]:
     """What the strategy sees for one stock, in plain words (from status.json strategy_state)."""
     name = str(strategy or "").split("(")[0]
-    head = f"🔍 <b>{esc(sym)}</b>"
+    head = f"🔍 <b>{esc(sym)}</b>" + (f" ({strategy_name(st['strategy'])})" if st.get("strategy") else "")
     if st.get("error"):
         return [f"{head}: strategy state unavailable"]
     bars, needed = int(st.get("bars") or 0), int(st.get("needed") or 0)
@@ -329,11 +336,15 @@ def picks_buttons(shown: list[str], top: list[str], configured: list[str]) -> li
     return rows
 
 
-def selection_decided(symbols: list[str], source: str, note: str) -> str:
+def selection_decided(symbols: list[str], source: str, note: str, strategies: dict | None = None) -> str:
     who = {"auto": "Top picks", "you": "Your choice", "timeout": "No tap", "config": "Your configured list", "none": "No trading"}.get(source, source)
     if not symbols:
         return f"\u26d4 <b>No trading today</b>\n{esc(note)}"
-    return f"\u2705 <b>Trading today: {esc(', '.join(symbols))}</b>\n{esc(who)}: {esc(note)}."
+    text = f"\u2705 <b>Trading today: {esc(', '.join(symbols))}</b>\n{esc(who)}: {esc(note)}."
+    per = [f"{esc(s)}: {strategy_name(strategies[s])}" for s in symbols if (strategies or {}).get(s)]
+    if per:
+        text += "\nStrategy per stock (checked on older and newer days): " + "; ".join(per)
+    return text
 
 
 def replay_summary(days: int, net: float, trades: int, worst_day: float | None = None) -> str:

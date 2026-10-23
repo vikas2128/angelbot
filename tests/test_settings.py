@@ -58,8 +58,8 @@ def test_invalid_result_is_refused_and_nothing_is_written():
 
 def test_reset_drops_everything():
     ST.apply("selqty", idx("selqty", 20))
-    ST.apply("univ", idx("univ", ["nifty50", "banknifty"]))
-    assert len(ST.summary()) == 2 and "Nifty 50 + Bank Nifty" in " ".join(ST.summary())
+    ST.apply("univ", idx("univ", ["banknifty"]))
+    assert len(ST.summary()) == 2 and "Bank Nifty" in " ".join(ST.summary())
     assert ST.reset() == 2 and ST.overrides() == {}
     assert yaml.safe_load(ST.path().read_text())["values"] == {}
 

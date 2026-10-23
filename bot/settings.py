@@ -28,11 +28,15 @@ SETTINGS = [
     {"id": "amount", "btn": "₹ per trade", "label": "Amount per trade", "path": "sizing.amount",
      "choices": [0, 2000, 5000, 10000, 20000, 25000, 50000], "typed": True},
     {"id": "selmode", "btn": "Mode", "label": "Selection mode", "path": "selection.mode", "choices": ["off", "auto", "confirm"]},
-    {"id": "topn", "btn": "Picks", "label": "Picks to trade", "path": "selection.top_n", "choices": [1, 2, 3]},
+    {"id": "topn", "btn": "Picks", "label": "Picks to trade", "path": "selection.top_n", "choices": [1, 2, 3, 4, 5]},
+    {"id": "maxpos", "btn": "Positions", "label": "Open positions at once", "path": "risk.max_open_positions",
+     "choices": [1, 2, 3, 4, 5]},
     {"id": "selqty", "btn": "Pick shares", "label": "Shares for a picked stock", "path": "selection.qty", "choices": [1, 2, 5, 10, 20, 50]},
     {"id": "listqty", "btn": "List shares", "label": "Shares for my list", "path": "instruments.qty", "choices": [1, 2, 5, 10, 20, 50]},
     {"id": "univ", "btn": "Universe", "label": "Stocks to screen", "path": "screener.universe",
      "choices": [_BUILTIN, ["nifty50"], ["banknifty"], ["nifty50", "banknifty"]]},
+    {"id": "perstock", "btn": "Per-stock strategy", "label": "Strategy per stock", "path": "screener.strategy_per_stock",
+     "choices": [False, True]},
     {"id": "btgate", "btn": "Backtest check", "label": "Backtest check", "path": "screener.backtest_gate",
      "choices": [False, True]},
     {"id": "strat", "btn": "Strategy", "label": "Strategy", "path": "strategy.name", "choices": ["ema_cross", "orb", "vwap_revert"]},
@@ -147,7 +151,7 @@ def current(cfg_merged: dict, s: dict):
         return list(v)
     if s["path"] == "sizing.amount":
         return float(v or 0)
-    if s["path"] == "screener.backtest_gate":
+    if s["path"] in ("screener.backtest_gate", "screener.strategy_per_stock"):
         return bool(v)
     return v
 
@@ -163,6 +167,8 @@ def show(s: dict, v) -> str:
         return " + ".join(_UNIVERSE_WORDS.get(x, str(x)) for x in v)
     if p == "screener.backtest_gate":
         return "on (skip stocks whose recent backtest lost)" if v else "off"
+    if p == "screener.strategy_per_stock":
+        return "on (each stock its best checked strategy)" if v else "off (one strategy for all)"
     if p == "sizing.amount":
         return f"₹{float(v):,.0f} (shares worked out per trade)" if float(v) else "off (use the share counts)"
     if p == "risk.max_daily_loss":

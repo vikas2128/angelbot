@@ -14,6 +14,7 @@ class Instrument:
     tick_size: float = 0.05   # in ₹
     qty: int = 1              # configured qty (shares, or lots for F&O)
     product: str = "INTRADAY"
+    strategy: str | None = None   # this stock's own strategy (picked per stock by the nightly backtests); None = config's
 
     @property
     def order_qty(self) -> int:

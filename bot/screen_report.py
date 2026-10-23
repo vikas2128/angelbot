@@ -128,7 +128,11 @@ def how_it_works(p: dict) -> list[str]:
         f"the size of today's gap ({share('gap')}), how much of a normal day's volume has traded so far ({share('volume')}) "
         f"and liquidity ({share('liquidity')}). A factor with no data is left out for that stock, not guessed.",
         "Volume traded so far is only comparable between stocks at the same moment, and means more later in the morning.",
-    ] + ([f"Backtest check: each stock was backtested the evening before with today's strategy and order size; a stock "
+    ] + ([f"Strategy per stock: each night every strategy is backtested on each stock. A stock's strategy is the one "
+          "with the best result after fees on the older two-thirds of the days, and it is kept only if it also made money "
+          "on the newer third, which it was not chosen on. A stock where no strategy passes is left out. This is a coarse "
+          "filter on a few weeks of history, not proof a stock will make money."] if p.get("strategy_per_stock") else []) + \
+        ([f"Backtest check: each stock was backtested the evening before with today's strategy and order size; a stock "
           f"whose backtest lost money after fees, or made fewer than {p['bt_min_trades']} trades, is left out. "
           "A few weeks of history is a coarse filter, not proof the stock will make money."] if p.get("backtest_gate") else [])
 
@@ -146,6 +150,11 @@ def render_html(snap: dict) -> str:
         return f'<span>Qty for ₹{float(p["order_value"]):,.0f}<b>{esc(_num(r["suggested_qty"]))}</b></span>'
 
     def bt_chip(r):
+        ch = r.get("choice") or {}
+        if ch.get("strategy"):
+            t = ch.get("test") or {}
+            return (f'<span>Strategy<b>{esc(ch["strategy"])}</b></span>'
+                    f'<span>Checked on newer days<b>{esc(_money(t.get("net_pnl")))} · {esc(str(t.get("trades")))} trades</b></span>')
         bt = r.get("bt")
         if not bt:
             return ""
@@ -266,7 +275,9 @@ def summary_html(snap: dict, today: str | None = None) -> str:
         lines.append("No stock passed the gates.")
     for r in ok[:n]:
         bits = [f"score {r['score']:.0f}", f"gap {_gap(r['gap_pct'])}", f"room {_num(r['range_to_cost'], 'x')} fees"]
-        if r.get("bt"):
+        if r.get("strategy"):
+            bits.append(f"strategy {r['strategy']}")
+        elif r.get("bt"):
             bits.append(f"backtest {_money(r['bt'].get('net_pnl'))} in {r['bt'].get('trades')} trades")
         tags = "".join(f" [{esc(t)}]" for t in r.get("indices") or [])
         lines.append(f"{r['rank']}. <b>{esc(r['symbol'])}</b>{tags} · " + " · ".join(bits))

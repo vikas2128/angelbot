@@ -349,6 +349,15 @@ systemctl --user start angelbot-backtest@paper             # the same through sy
 journalctl --user -u angelbot-backtest@paper -n 80 --no-pager
 ```
 
+**Strategy per stock (`screener.strategy_per_stock: true`, on in the shipped config; ⚙️ Settings → Per-stock strategy).**
+The nightly job also runs a walk-forward check per stock: each strategy is backtested on the older two-thirds of the 30
+days and on the newer third separately. A stock's strategy is the one with the best result after fees on the older
+days, kept only if it **also** made money on the newer days, with at least 12 and 5 trades. A stock where no strategy
+passes is left out of the ranking. Each picked stock then trades its own strategy (the trade journal records which);
+`/status`, the app and the morning message show it. With `selection.top_n: 5` and `risk.max_open_positions: 5` up to
+five stocks trade at once, sharing `risk.max_daily_loss` and `max_trades_per_day`. If no stock passes, selection
+follows `selection.on_failure` (`config`: your instruments list with the default strategy; `none`: no trading).
+
 **Strategy comparison (information only).** The same nightly run also backtests every strategy (ema_cross, orb,
 vwap_revert) on each stock, with the same order size, exits and limits. The screener page gets a **Strategies** tab
 (totals per strategy: net after fees, trades, win rate, on how many stocks it made money, and a per-stock table),

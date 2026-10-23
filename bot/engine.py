@@ -35,8 +35,10 @@ class Engine:
         st = cfg["strategy"]
         self.strategy_name = st["name"]
         self.allow_short = bool(st.get("allow_short"))
-        params = (st.get("params") or {}).get(st["name"], {})
-        self.strategies = {i.symbol: build(st["name"], params) for i in instruments}
+        all_params = st.get("params") or {}
+        # each stock runs its own strategy when one was picked for it (strategy per stock), else the config's
+        self.strategy_of = {i.symbol: (getattr(i, "strategy", None) or st["name"]) for i in instruments}
+        self.strategies = {sym: build(name, all_params.get(name, {})) for sym, name in self.strategy_of.items()}
         for s in self.strategies.values():
             s.reset_day()
         self.risk = RiskManager(cfg)
@@ -154,7 +156,7 @@ class Engine:
         ok, why = self.risk.can_enter(now, self.om.open_positions(), qty * ltp)
         if not ok:
             return False, why
-        oid = self.om.enter(inst.symbol, direction, ltp, now, f"{self.strategy_name} signal", qty=qty)
+        oid = self.om.enter(inst.symbol, direction, ltp, now, f"{self.strategy_of[inst.symbol]} signal", qty=qty)
         if oid:
             self.risk.trades_today += 1
             return True, "entry placed"
@@ -293,6 +295,7 @@ class Engine:
         write_status({
             "state": self.state, "mode": self.broker.mode, "replay": self.replay,
             "strategy": self.strategies[self.instruments[0].symbol].describe(),
+            "strategies": {sym: s.describe() for sym, s in self.strategies.items()},
             "instruments": [i.symbol for i in self.instruments],
             "now": self.now().isoformat(),
             "day_pnl": round(day_pnl, 2), "realized_net": round(self.om.realized_net, 2),
@@ -317,7 +320,7 @@ class Engine:
         out = {}
         for sym, strat in self.strategies.items():
             try:
-                out[sym] = strat.state(self.bars_today.get(sym) or [], self.ltp.get(sym))
+                out[sym] = {**strat.state(self.bars_today.get(sym) or [], self.ltp.get(sym)), "strategy": strat.name}
             except Exception as e:
                 out[sym] = {"error": str(e)}
         return out
@@ -355,7 +358,10 @@ class Engine:
         self.state = "running"
         self.journal.event(self.now(), "start", f"mode={self.broker.mode} replay={self.replay} profile={os.environ.get('ANGELBOT_PROFILE', '')}")
         from bot import settings
-        notify.send(messages.started(self.broker.mode, self.strategy_name, [i.symbol for i in self.instruments],
+        names = set(self.strategy_of.values())
+        shown = self.strategy_name if names == {self.strategy_name} else \
+            ", ".join(f"{sym} {name}" for sym, name in self.strategy_of.items())
+        notify.send(messages.started(self.broker.mode, shown, [i.symbol for i in self.instruments],
                                      None if self.replay else settings.summary() + [f"⚠️ {x}" for x in settings.problems()],
                                      self.restored))
         self.feed.start()

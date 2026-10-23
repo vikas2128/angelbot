@@ -82,7 +82,15 @@ def run_screen(cfg: dict, broker, master: list[dict], now: datetime, universe: l
     if not insts:
         raise ValueError("no stocks to screen: " + "; ".join(errors))
     raws, errs = collect(broker, insts, now, int(p["lookback_days"]), pause=pause, progress=progress)
-    if p.get("backtest_gate"):                                     # attach last night's per-stock backtests
+    if p.get("strategy_per_stock"):                                # attach last night's per-stock strategy choices
+        from bot import stock_backtest as SB
+        choices, why = SB.load_choices(cfg, now)
+        if choices is None:
+            p["bt_unavailable"] = f"{why}; run  ./deploy/ab <area> backtest-stocks  after the close"
+            errs = errs + [f"Strategy check: {p['bt_unavailable']}. Every stock is left out until it runs."]
+        for raw in raws:
+            raw["choice"] = (choices or {}).get(raw["symbol"])
+    elif p.get("backtest_gate"):                                   # attach last night's per-stock backtests
         from bot import stock_backtest as SB
         results, why = SB.load_fresh(cfg, now)
         if results is None:

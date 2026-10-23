@@ -24,6 +24,7 @@ DEFAULTS = {
     "order_value": 40000,          # planned ₹ per order: fees as a share of the order depend on this
     "qty": 0,                      # fixed shares per order (the bot's real size); 0 = size by order_value
     "max_order_value": 0,          # gate: one order (qty x price) above this ₹ is refused by the bot; 0 = no gate
+    "strategy_per_stock": False,   # each stock trades the strategy that passed its walk-forward check (stock_backtest.choose)
     "backtest_gate": False,        # gate: leave out a stock whose recent backtest (stock_backtest.py) lost money or traded too little
     "bt_min_trades": 20,           # ... fewer backtest trades than this is too few to judge
     "bt_min_net": 0.0,             # ... net P&L after fees must be above this (₹)
@@ -108,6 +109,8 @@ def metrics(raw: dict, p: dict, charges_cfg: dict) -> dict:
     vol = raw.get("volume")
     m["vol_pct_of_avg"] = round(float(vol) / avg_vol * 100, 1) if vol is not None and avg_vol > 0 else None
     m["bt"] = raw.get("bt")                       # this stock's recent backtest summary, if the backtest check is on
+    m["choice"] = raw.get("choice")               # its walk-forward strategy choice, if strategy-per-stock is on
+    m["strategy"] = (m["choice"] or {}).get("strategy")
     if ltp > 0:
         qty = int(p.get("qty") or 0) or max(1, int(float(p["order_value"]) // ltp))
         cost = order_charges("BUY", qty, ltp, charges_cfg) + order_charges("SELL", qty, ltp, charges_cfg)
@@ -128,7 +131,15 @@ def gates(m: dict, p: dict) -> list[str]:
         return out
     if m["ltp"] is None:
         out.append("no price")
-    if p.get("backtest_gate"):
+    if p.get("strategy_per_stock"):
+        ch, why = m.get("choice"), p.get("bt_unavailable")
+        if why:
+            out.append(f"strategy check: {why}")
+        elif not ch:
+            out.append("no recent strategy check for this stock")
+        elif not ch.get("strategy"):
+            out.append(f"no strategy passed the check: {ch.get('why')}")
+    elif p.get("backtest_gate"):
         bt, why = m.get("bt"), p.get("bt_unavailable")
         if why:
             out.append(f"backtest check: {why}")

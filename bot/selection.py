@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import replace
 from datetime import datetime
 
 from bot import control, messages, notify
@@ -37,7 +38,7 @@ DEFAULTS = {
     "on_failure": "config",     # screen failed or nothing passed: config | none
     "qty": 1,                   # shares per order for a picked stock ...
     "order_value": 0,           # ... or, if > 0, shares = this many rupees // price (bigger size = bigger risk per trade)
-    "max_symbols": 3,
+    "max_symbols": 5,
 }
 
 
@@ -79,11 +80,18 @@ def _instrument(row: dict, s: dict, master: list[dict]) -> Instrument:
         qty = max(1, int(float(s["order_value"]) // float(row["ltp"])))
     else:
         qty = int(s["qty"])
-    return resolve([{"symbol": row["symbol"], "exchange": "NSE", "qty": qty, "product": "INTRADAY"}], master)[0]
+    inst = resolve([{"symbol": row["symbol"], "exchange": "NSE", "qty": qty, "product": "INTRADAY"}], master)[0]
+    return _with_strategy(inst, row)
 
 
-def _decide(day: str, symbols: list[str], source: str, note: str) -> dict:
-    d = {"market_date": day, "symbols": symbols, "source": source, "note": note,
+def _with_strategy(inst: Instrument, row: dict | None) -> Instrument:
+    """The stock's own strategy from today's snapshot row (strategy per stock), if it has one."""
+    name = (row or {}).get("strategy")
+    return replace(inst, strategy=name) if name else inst
+
+
+def _decide(day: str, symbols: list[str], source: str, note: str, strategies: dict | None = None) -> dict:
+    d = {"market_date": day, "symbols": symbols, "source": source, "note": note, "strategies": strategies or {},
          "decided_at": now_ist().isoformat(timespec="seconds")}
     control.write_json(control.SEL_STATE, d)
     req = control.read_json(control.SEL_REQUEST)
@@ -127,12 +135,14 @@ def run(cfg: dict, broker, config_insts: list[Instrument], master: list[dict], n
     def finish(symbols: list[str], source: str, note: str, rows: dict | None = None):
         insts = []
         for sym in symbols:
+            row = (rows or {}).get(sym)
             if sym in configured:
-                insts.append(next(i for i in config_insts if i.symbol == sym))
+                insts.append(_with_strategy(next(i for i in config_insts if i.symbol == sym), row))
             else:
-                insts.append(_instrument((rows or {}).get(sym) or {"symbol": sym}, s, master))
-        d = _decide(day, symbols, source, note)
-        notify_fn(messages.selection_decided(symbols, source, note))
+                insts.append(_instrument(row or {"symbol": sym}, s, master))
+        strategies = {i.symbol: i.strategy for i in insts if i.strategy}
+        d = _decide(day, symbols, source, note, strategies)
+        notify_fn(messages.selection_decided(symbols, source, note, strategies))
         return insts, d
 
     def fallback(why: str):
@@ -151,7 +161,11 @@ def run(cfg: dict, broker, config_insts: list[Instrument], master: list[dict], n
             if not syms:
                 return [], prior
             rows = {r["symbol"]: r for r in control.read_screen().get("rows", [])}
-            return [next((i for i in config_insts if i.symbol == x), None) or _instrument(rows.get(x) or {"symbol": x}, s, master)
+            kept = prior.get("strategies") or {}
+            for x, name in kept.items():                  # the strategies decided this morning, even if the snapshot changed
+                rows[x] = {**(rows.get(x) or {"symbol": x}), "strategy": name}
+            return [_with_strategy(next((i for i in config_insts if i.symbol == x), None), rows.get(x))
+                    if any(i.symbol == x for i in config_insts) else _instrument(rows.get(x) or {"symbol": x}, s, master)
                     for x in syms], prior
         _wait_until(_hms(now_fn(), s["screen_at"]), now_fn, sleep_fn)
         snap = (screen_fn or _screen)(cfg, broker, master, now_fn(), s)

@@ -202,6 +202,7 @@ async function showSignIn() {
 // ───────────────────────────── home ─────────────────────────────
 function strategyLines(sym, st) {
   if (!st) return [];
+  if (st.strategy && Object.keys((state.status || {}).strategies || {}).length > 1) sym = `${sym} (${STRATEGY_NAMES[st.strategy] || st.strategy})`;
   if (st.error) return [`${sym}: strategy state unavailable`];
   const bars = st.bars || 0, need = st.needed || 0;
   if (need && bars < need) return [`${sym}: warming up, ${bars} of ${need} one-minute bars`];
@@ -224,6 +225,11 @@ function strategyLines(sym, st) {
   return [`${sym} · ${bars} bars`];
 }
 const STRATEGY_NAMES = { ema_cross: 'EMA crossover', orb: 'Opening range breakout', vwap_revert: 'VWAP reversion' };
+function perStockTitle(s) {
+  const names = [...new Set(Object.values(s.strategies || {}).map(v => String(v).split('(')[0]))];
+  if (names.length > 1) return 'Strategy per stock';
+  return STRATEGY_NAMES[names[0] || String(s.strategy || '').split('(')[0]] || 'Strategy';
+}
 function stat(label, value, klass = '') { return h('div', { class: 'stat' }, h('div', { class: 'l', text: label }), h('div', { class: 'v ' + klass, text: value })); }
 function renderHome() {
   if (state.tab !== 'home') return;
@@ -253,7 +259,7 @@ function renderHome() {
   const strat = Object.entries(s.strategy_state || {});
   const ltp = Object.entries(s.ltp || {}).map(([k, v]) => `${k.replace(/-EQ$/, '')} ${price(v)}`).join(' · ');
   const stratCard = h('div', { class: 'card' },
-    h('div', { class: 'row' }, h('h2', { class: 'm0', text: STRATEGY_NAMES[String(s.strategy || '').split('(')[0]] || 'Strategy' }), ltp ? h('span', { class: 'small muted', text: ltp }) : null),
+    h('div', { class: 'row' }, h('h2', { class: 'm0', text: perStockTitle(s) }), ltp ? h('span', { class: 'small muted', text: ltp }) : null),
     strat.length ? h('ul', { class: 'lines mt8' }, strat.flatMap(([sym, st]) => strategyLines(sym, st)).map((t, i) => h('li', { class: i % 2 ? 'sub' : '', text: t })))
       : h('p', { class: 'muted m0 mt8 small', text: (s.instruments || []).join(', ') || 'No data yet' }));
   const btn = (name, text, klass, fn) => h('button', { class: 'btn ' + klass, onclick: async ev => {

@@ -29,6 +29,9 @@ FIXTURE_MASTER = Path(__file__).parent / "fixtures" / "scrip_sample.json"
 def cfg():
     c = copy.deepcopy(load_config())
     c["instruments"] = [{"symbol": "SBIN-EQ", "exchange": "NSE", "qty": 1, "product": "INTRADAY"}]
+    # trading tests stay independent of what config.yaml happens to set today: one position, fixed shares
+    c["risk"]["max_open_positions"] = 1
+    c["sizing"] = {"amount": 0}
     return c
 
 

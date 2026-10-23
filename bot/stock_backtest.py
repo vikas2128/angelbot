@@ -23,6 +23,9 @@ from bot import config as C
 from bot import control
 
 DEFAULT_DAYS = 30
+WF_TEST_SHARE = 1 / 3        # walk-forward: the newest third of the days is kept back to confirm the choice
+WF_MIN_TRAIN_TRADES = 12     # ... enough trades on the older days to choose on
+WF_MIN_TEST_TRADES = 5       # ... and on the newer days to confirm
 MAX_AGE_DAYS = 4             # Friday evening's results still count on Monday (and after a one-day holiday)
 
 
@@ -41,7 +44,7 @@ def _qty(cfg: dict) -> int:
 def fingerprint(cfg: dict) -> str:
     """What the results depend on. A change to any of these makes old results stale."""
     st = cfg["strategy"]
-    key = {"strategy": st["name"], "params": (st.get("params") or {}).get(st["name"], {}),
+    key = {"strategy": st["name"], "params": st.get("params") or {},          # every strategy's: all are backtested
            "timeframe": st.get("timeframe_min", 1), "short": bool(st.get("allow_short")), "exits": cfg.get("exits"),
            "amount": float((cfg.get("sizing") or {}).get("amount") or 0), "qty": _qty(cfg), "risk": cfg.get("risk"), "charges": cfg.get("charges"),
            "session": {k: v for k, v in (cfg.get("session") or {}).items() if k != "holidays"}}
@@ -64,7 +67,7 @@ def run_all(cfg: dict, broker, insts: list, now: datetime, days: int = DEFAULT_D
     all_params = cfg["strategy"].get("params") or {}
     end = now.replace(second=0, microsecond=0)
     start = (end - timedelta(days=days)).replace(hour=9, minute=15)
-    results, compare, errors = {}, {}, []
+    results, compare, choices, errors = {}, {}, {}, []
     for n, inst in enumerate(insts, 1):
         if progress:
             progress(n, len(insts), inst.symbol)
@@ -76,17 +79,69 @@ def run_all(cfg: dict, broker, insts: list, now: datetime, days: int = DEFAULT_D
             if not bars:
                 errors.append(f"{inst.symbol}: no candles")
                 continue
-            per = {}
+            per, walk = {}, {}
+            train_bars, test_bars = split_walk_forward(bars)
             for name in STRATEGIES:                                  # same candles, size and exits; only the strategy differs
-                per[name] = summarise(run_backtest(cfg, bars, qty=_qty(cfg), strategy=name, params=all_params.get(name, {})))
+                p = all_params.get(name, {})
+                per[name] = summarise(run_backtest(cfg, bars, qty=_qty(cfg), strategy=name, params=p))
+                if train_bars and test_bars:
+                    walk[name] = {"train": summarise(run_backtest(cfg, train_bars, qty=_qty(cfg), strategy=name, params=p)),
+                                  "test": summarise(run_backtest(cfg, test_bars, qty=_qty(cfg), strategy=name, params=p))}
             compare[inst.symbol] = per
             results[inst.symbol] = per[current]
+            choices[inst.symbol] = choose(walk)
         except Exception as e:                                       # network, rate limit, bad data
             errors.append(f"{inst.symbol}: {e}")
     st = cfg["strategy"]
     return {"run_at": now.isoformat(timespec="seconds"), "days": days, "strategy": st["name"],
             "amount": float((cfg.get("sizing") or {}).get("amount") or 0), "qty": _qty(cfg),
-            "fingerprint": fingerprint(cfg), "results": results, "compare": compare, "errors": errors}
+            "fingerprint": fingerprint(cfg), "results": results, "compare": compare, "choices": choices, "errors": errors}
+
+
+def split_walk_forward(bars: list) -> tuple[list, list]:
+    """(older days, newer days): the newest third of the trading days is kept back to confirm a choice."""
+    days = sorted({b.start.strftime("%Y-%m-%d") for b in bars})
+    if len(days) < 6:
+        return [], []
+    cut = days[len(days) - max(2, round(len(days) * WF_TEST_SHARE))]
+    return [b for b in bars if b.start.strftime("%Y-%m-%d") < cut], [b for b in bars if b.start.strftime("%Y-%m-%d") >= cut]
+
+
+def choose(walk: dict) -> dict:
+    """This stock's strategy: the best net after fees on the OLDER days, kept only if it also made money on the NEWER
+    days it was not chosen on, with enough trades on both. Otherwise none (the stock is left out)."""
+    ok = {n: w for n, w in walk.items()
+          if int(w["train"]["trades"] or 0) >= WF_MIN_TRAIN_TRADES and float(w["train"]["net_pnl"] or 0) > 0}
+    if not walk:
+        return {"strategy": None, "why": "not enough days of candles to check"}
+    if not ok:
+        return {"strategy": None, "why": "no strategy made money (with enough trades) on the older days"}
+    best = max(ok, key=lambda n: float(ok[n]["train"]["net_pnl"]))
+    t = ok[best]["test"]
+    if int(t["trades"] or 0) < WF_MIN_TEST_TRADES:
+        return {"strategy": None, "why": f"{best} was best on the older days but traded only {t['trades']} times on the newer days"}
+    if float(t["net_pnl"] or 0) <= 0:
+        return {"strategy": None, "why": f"{best} was best on the older days but lost ₹{-float(t['net_pnl']):,.2f} on the newer days"}
+    return {"strategy": best, "train": ok[best]["train"], "test": t}
+
+
+def load_choices(cfg: dict, now: datetime) -> tuple[dict | None, str]:
+    """(this-morning-usable per-stock choices, "") or (None, why not). Valid after a switch of the default strategy:
+    every strategy was run."""
+    snap = control.read_json(path())
+    same = copy.deepcopy(cfg)
+    same["strategy"]["name"] = snap.get("strategy") or cfg["strategy"]["name"]
+    if not snap.get("run_at") or "choices" not in snap:
+        return None, "no per-stock strategy check yet"
+    try:
+        age = (now - datetime.fromisoformat(snap["run_at"])).total_seconds() / 86400
+    except (TypeError, ValueError):
+        return None, "the stock backtests file is damaged"
+    if age > MAX_AGE_DAYS:
+        return None, f"the stock backtests are {age:.0f} days old"
+    if snap.get("fingerprint") != fingerprint(same):
+        return None, "the exits, risk limits, order size or fees changed since the stock backtests were run"
+    return snap.get("choices") or {}, ""
 
 
 def save(snapshot: dict) -> None:

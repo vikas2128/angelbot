@@ -28,7 +28,8 @@ class OrderManager:
         self.inst = {i.symbol: i for i in instruments}
         self.positions: dict[str, Position] = {i.symbol: Position(i.symbol) for i in instruments}
         self.pending: dict[str, OrderRecord] = {}
-        self.strategy_name = strategy_name
+        self.strategy_name = strategy_name           # the default; a stock picked with its own strategy overrides it
+        self.strategy_by_symbol = {i.symbol: i.strategy for i in instruments if getattr(i, "strategy", None)}
         self.on_trade_closed = on_trade_closed
         self.realized_net = 0.0          # day P&L after charges, closed trades
         self.charges_today = 0.0
@@ -37,6 +38,9 @@ class OrderManager:
         self.exit_alerted: set[str] = set()
 
     # ------------------------------------------------------------------ queries
+    def strategy_of(self, symbol: str) -> str:
+        return self.strategy_by_symbol.get(symbol) or self.strategy_name
+
     def has_pending(self, symbol: str, purpose: str | None = None) -> bool:
         return any(o.symbol == symbol and (purpose is None or o.purpose == purpose) for o in self.pending.values())
 
@@ -190,7 +194,7 @@ class OrderManager:
             self._set_brackets(pos)
             if was_flat:
                 notify.send(messages.opened(rec.symbol, cyc["side"], qty, px, pos.stop, pos.target,
-                                            self.strategy_name, self.mode, now))
+                                            self.strategy_of(rec.symbol), self.mode, now))
         else:                                                 # reduce / close
             closed = min(qty, abs(pos.qty))
             gross = (px - pos.avg_price) * closed * (1 if pos.qty > 0 else -1)
@@ -218,7 +222,7 @@ class OrderManager:
         self.realized_net += net
         self.journal.trade(self.mode, symbol, cyc.get("side", "?"), cyc.get("max_qty", 0), cyc.get("entry_ts"),
                            cyc.get("entry_price", 0.0), now, exit_px, gross, charges,
-                           cyc.get("exit_reason", "unknown"), self.strategy_name)
+                           cyc.get("exit_reason", "unknown"), self.strategy_of(symbol))
         notify.send(messages.closed(symbol, cyc.get("side", "LONG"), cyc.get("max_qty", 0),
                                     cyc.get("entry_price", 0.0), exit_px, gross, charges, net,
                                     cyc.get("exit_reason"), self.mode, cyc.get("entry_ts"), now))
