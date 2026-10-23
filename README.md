@@ -24,7 +24,7 @@
 
 **Safety defaults:** paper mode · LIMIT orders only · ≤ 3 orders/sec · stop loss on every trade · daily loss limit →
 flatten + halt · consecutive-loss cooldown · entry window 09:20–15:00 · auto square-off 15:12 · kill switch ·
-crash-restart adopts open positions.
+crash-restart adopts open live positions and keeps the day's trade count and loss limit.
 
 ---
 
@@ -135,7 +135,12 @@ systemctl --user list-timers 'angelbot@*' --no-pager
 ### 2.7 Configuration (`config/config.yaml`)
 
 Strategy and its parameters, instruments, risk limits, session times and holidays, execution and charges. The optional
-`screener:` and `selection:` sections are covered in §5 and §6.
+`screener:` and `selection:` sections are covered in §5 and §6, and `sizing.amount` (rupees per trade) in §4.
+
+- **Which value wins:** a setting changed from Telegram (`runtime/<area>/settings.yaml`, §4) wins over `config.yaml` for
+  that area. If an edit to `config.yaml` seems to have no effect, check ⚙️ Settings for a ✏️ mark.
+- **Order size, in order of priority:** `sizing.amount` > 0 (shares that fit in the amount), else `selection.qty` /
+  `selection.order_value` for a picked stock, else `instruments[].qty`.
 
 - Every change: edit → `./deploy/ab paper check` (validates the config) → backtest → it applies from the **next start**
   (or a restart, below). With Claude Code: ask it, and it runs `validate_config` and a backtest first.
@@ -158,7 +163,7 @@ The services are systemd **user** units, one instance per area (`@paper`, `@live
 ```bash
 # trading bot
 systemctl --user start angelbot@paper          # start now (exits at once on a weekend, holiday or after the session)
-systemctl --user restart angelbot@paper        # mid-session restart: open positions are re-adopted from the broker
+systemctl --user restart angelbot@paper        # mid-session restart: only with NO open paper position (see below)
 systemctl --user stop angelbot@paper           # stop now (prefer a pause or kill below when positions are open)
 systemctl --user status angelbot@paper
 journalctl --user -u angelbot@paper -f         # follow the log
@@ -200,6 +205,14 @@ systemctl --user daemon-reload                     # only if files in deploy/*.s
 The trading bot loads new code at its next start (tomorrow's 09:05 timer). To use it today, outside a position,
 `systemctl --user restart angelbot@paper`. Config changes work the same way.
 
+**Restarting mid-session.** Today's closed trades are rebuilt from the journal, so the trade count, daily loss limit,
+loss streak and cooldown carry on, and today's picked stocks are kept. Open positions differ by area:
+- **paper:** a simulated position exists only in the bot's memory and is **lost** on a restart (it is never closed in
+  the journal). Restart only with no open position: `./deploy/ab paper status`, or use 🔄 Restart in Telegram, which
+  checks this for you.
+- **live:** open positions are read back from the broker and managed again, with the stop and target set from
+  the average price.
+
 ---
 
 ## 4. Telegram
@@ -230,6 +243,7 @@ Tap a setting, then a value. Only fixed choices are offered, no typed values:
 
 | Setting | Choices |
 |---|---|
+| Amount per trade (₹ per trade) | off · ₹2,000 · 5,000 · 10,000 · 20,000 · 25,000 · 50,000, or type `/amount 7500` |
 | Selection mode / picks to trade | off · auto · confirm / 1 · 2 · 3 |
 | Shares for a picked stock / for my list | 1 · 2 · 5 · 10 · 20 · 50 |
 | Stocks to screen | built-in 20 · Nifty 50 · Bank Nifty · Nifty 50 + Bank Nifty |
@@ -237,6 +251,10 @@ Tap a setting, then a value. Only fixed choices are offered, no typed values:
 | Max daily loss / max trades per day | ₹250 to ₹5,000 / 3 · 5 · 10 · 20 |
 | Stop loss / target | 0.2–1.0% / 0.3–2.0% |
 
+- **Amount per trade** (`sizing.amount` in config, or `/amount 7500` in Telegram, `/amount off` to stop): at each entry
+  the bot buys as many whole shares as fit in the amount at the entry's limit price, so one order never costs more
+  than it. A stock whose one share costs more is skipped (and the screener leaves it out). While an amount is set, the
+  share counts are not used. It must be at most `risk.max_order_value`. Fees are a bigger share of a small order.
 - Changes are saved in `runtime/<area>/settings.yaml`, **not** in `config/config.yaml`, and win over it for that area
   only: a change in the Paper bot never touches research or live. ✏️ marks a changed value; **↩️ Reset all** goes back
   to config.yaml. The file keeps the last 20 changes.
@@ -326,7 +344,7 @@ selection:
   on_timeout: config     # confirm with no tap: config (your list) | top (the top picks)
   on_failure: config     # screen failed or nothing passed: config | none (no trading today)
   qty: 1                 # shares per order for a picked stock ...
-  order_value: 0         # ... or, if > 0, shares = this many rupees // price
+  order_value: 0         # ... or, if > 0, shares = this many rupees // price (at least 1 share)
 ```
 
 - **auto**: at `screen_at` the bot screens on its own login (no second login) and trades the top `top_n` picks.
@@ -346,6 +364,7 @@ selection:
 ./deploy/ab research fetch SBIN-EQ --days 90                   # 1-minute candles → data/candles/ (logs in for market data; not while a bot runs)
 ./deploy/ab research backtest SBIN-EQ --from 2026-07-01 --to 2026-09-15
 ./deploy/ab research backtest SBIN-EQ --strategy orb --params '{"range_minutes":30}'
+./deploy/ab research backtest SBIN-EQ --amount 10000          # shares per trade = what fits in ₹10,000 (or --qty 5)
 ./deploy/ab research run --replay data/candles/SBIN-EQ_ONE_MINUTE.csv    # full engine, offline, one summary to the Test bot
 ./deploy/ab research sample-data SBIN-EQ --days 20             # synthetic candles (prove nothing about returns)
 ```
@@ -431,7 +450,10 @@ registration. Confirm specifics with Angel One SmartAPI support; rules and broke
 - `charges` in the config are approximations; check Angel One's current tariff.
 - Exits use marketable LIMIT orders with chasing; in a fast market an exit can lag. Stuck exits alert after
   `max_exit_chases`.
-- The screener and morning selection have not been backtested.
+- The screener, morning selection and any value changed in ⚙️ Settings have not been backtested. Backtest a new size
+  or limit first (`backtest --amount` / `--qty`, §7).
+- A **paper** position is lost if the bot restarts while it is open (crash or manual restart); live positions are
+  re-adopted from the broker.
 
 ## 12. Troubleshooting
 

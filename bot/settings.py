@@ -10,6 +10,7 @@ Deliberately NOT here: paper/live mode, orders per second, order type, the order
 from __future__ import annotations
 
 import copy
+import math
 import os
 import tempfile
 from datetime import datetime
@@ -24,6 +25,8 @@ _BUILTIN = "builtin"
 
 # id (short, for button data), label, dotted config path, choices. "instruments.qty" sets every instrument's qty.
 SETTINGS = [
+    {"id": "amount", "btn": "₹ per trade", "label": "Amount per trade", "path": "sizing.amount",
+     "choices": [0, 2000, 5000, 10000, 20000, 25000, 50000], "typed": True},
     {"id": "selmode", "btn": "Mode", "label": "Selection mode", "path": "selection.mode", "choices": ["off", "auto", "confirm"]},
     {"id": "topn", "btn": "Picks", "label": "Picks to trade", "path": "selection.top_n", "choices": [1, 2, 3]},
     {"id": "selqty", "btn": "Pick shares", "label": "Shares for a picked stock", "path": "selection.qty", "choices": [1, 2, 5, 10, 20, 50]},
@@ -48,16 +51,41 @@ def path() -> Path:
     return C.RUNTIME_DIR / "settings.yaml"
 
 
+def _acceptable(s: dict, v) -> bool:
+    """Only one of the setting's own choices (or, for a typed setting, a finite number >= 0) is ever used."""
+    if s.get("typed"):
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+    return v in s["choices"]
+
+
 def read() -> dict:
+    """{values, history, problems}. A damaged file or a value that is not one of the choices (say, a hand edit) is
+    ignored and reported in `problems`, so the bot still starts, on config.yaml values for those settings."""
     try:
         d = yaml.safe_load(path().read_text()) or {}
     except FileNotFoundError:
-        return {"values": {}, "history": []}
-    return {"values": dict(d.get("values") or {}), "history": list(d.get("history") or [])}
+        return {"values": {}, "history": [], "problems": []}
+    except (yaml.YAMLError, UnicodeDecodeError) as e:
+        return {"values": {}, "history": [], "problems": [f"settings.yaml is damaged, so it is ignored ({type(e).__name__})"]}
+    if not isinstance(d, dict):
+        return {"values": {}, "history": [], "problems": ["settings.yaml is damaged, so it is ignored"]}
+    by_path = {x["path"]: x for x in SETTINGS}
+    values, problems = {}, []
+    for k, v in dict(d.get("values") or {}).items():
+        if k in by_path and _acceptable(by_path[k], v):
+            values[k] = v
+        else:
+            problems.append(f"ignored {k}: {v!r} is not an allowed value")
+    hist = d.get("history")
+    return {"values": values, "history": list(hist) if isinstance(hist, list) else [], "problems": problems}
 
 
 def overrides() -> dict:
     return read()["values"]
+
+
+def problems() -> list[str]:
+    return read()["problems"]
 
 
 def _get(cfg: dict, dotted: str):
@@ -101,8 +129,10 @@ def merge(cfg: dict, values: dict) -> dict:
 
 def load(config_path: Path | None = None) -> dict:
     """The config the bot runs with: config.yaml plus this area's Telegram overrides, validated."""
+    from bot import sizing
     cfg = merge(C.load_config(config_path), overrides())
     C.validate_config(cfg)
+    sizing.validate(cfg)
     return cfg
 
 
@@ -113,6 +143,8 @@ def current(cfg_merged: dict, s: dict):
         if v is None or list(v) == list(DEFAULT_UNIVERSE):
             return _BUILTIN
         return list(v)
+    if s["path"] == "sizing.amount":
+        return float(v or 0)
     return v
 
 
@@ -125,6 +157,8 @@ def show(s: dict, v) -> str:
         if v == _BUILTIN:
             return "built-in 20 stocks"
         return " + ".join(_UNIVERSE_WORDS.get(x, str(x)) for x in v)
+    if p == "sizing.amount":
+        return f"₹{float(v):,.0f} (shares worked out per trade)" if float(v) else "off (use the share counts)"
     if p == "risk.max_daily_loss":
         return f"₹{float(v):,.0f}"
     if p.startswith("exits."):
@@ -135,9 +169,10 @@ def show(s: dict, v) -> str:
 
 
 def _validate(merged: dict) -> None:
-    from bot import selection
+    from bot import selection, sizing
     C.validate_config(merged)
     selection.settings(merged)
+    sizing.validate(merged)
 
 
 def _write(d: dict) -> None:
@@ -158,10 +193,27 @@ def apply(sid: str, index: int, base: dict | None = None, now: datetime | None =
         raise SettingsError("Unknown setting.")
     if not 0 <= index < len(s["choices"]):
         raise SettingsError("Unknown choice.")
+    return _save(s, s["choices"][index], base, now)
+
+
+def apply_value(sid: str, value, base: dict | None = None, now: datetime | None = None) -> tuple[str, str]:
+    """Set a setting that also takes a typed value (only the amount per trade). Same checks as apply()."""
+    s = BY_ID.get(sid)
+    if s is None or not s.get("typed"):
+        raise SettingsError("That setting only takes one of its buttons.")
+    try:
+        value = float(str(value).replace(",", "").replace("₹", "").strip())
+    except ValueError:
+        raise SettingsError("Not a number.") from None
+    if not math.isfinite(value):
+        raise SettingsError("Not a number.")
+    return _save(s, int(value) if value == int(value) else value, base, now)
+
+
+def _save(s: dict, value, base: dict | None, now: datetime | None) -> tuple[str, str]:
     base = base if base is not None else C.load_config()
     d = read()
     old = current(merge(base, d["values"]), s)
-    value = s["choices"][index]
     values = dict(d["values"])
     if current(base, s) == value:
         values.pop(s["path"], None)                    # back to the config.yaml value: no override needed

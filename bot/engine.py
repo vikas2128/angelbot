@@ -8,7 +8,7 @@ import time
 from collections import deque
 from datetime import datetime, timedelta
 
-from bot import messages, notify
+from bot import messages, notify, sizing
 from bot.bars import BarBuilder
 from bot.control import read_control, set_control, write_status
 from bot.journal import Journal, trades_on
@@ -75,7 +75,8 @@ class Engine:
             net = float(r["net_pnl"] or 0)
             self.om.realized_net += net
             self.om.charges_today += float(r["charges"] or 0)
-            self.risk.on_trade_closed(net, datetime.fromisoformat(r["exit_ts"]))
+            ts = datetime.fromisoformat(r["exit_ts"])
+            self.risk.on_trade_closed(net, ts if ts.tzinfo else ts.replace(tzinfo=self.now().tzinfo))
         self.risk.trades_today = len(rows)
         if self.risk.cooldown_until and self.risk.cooldown_until <= self.now():
             self.risk.cooldown_until = None
@@ -143,10 +144,16 @@ class Engine:
         if self.control["paused"] or self.control["kill"] or self.flatten_reason:
             return False, "paused/killed/flattening"
         ltp = self.ltp.get(inst.symbol, price)
-        ok, why = self.risk.can_enter(now, self.om.open_positions(), inst.order_qty * ltp)
+        qty, amt = inst.order_qty, sizing.amount(self.cfg)
+        if amt:                                      # shares from the amount per trade, at the entry's limit price
+            limit = max(ltp, self.om.entry_price(inst.symbol, direction, ltp))
+            qty = sizing.qty_for(amt, limit, inst.lot_size)
+            if not qty:
+                return False, f"₹{amt:,.0f} per trade buys no share at ₹{limit:,.2f}"
+        ok, why = self.risk.can_enter(now, self.om.open_positions(), qty * ltp)
         if not ok:
             return False, why
-        oid = self.om.enter(inst.symbol, direction, ltp, now, f"{self.strategy_name} signal")
+        oid = self.om.enter(inst.symbol, direction, ltp, now, f"{self.strategy_name} signal", qty=qty)
         if oid:
             self.risk.trades_today += 1
             return True, "entry placed"
@@ -331,7 +338,8 @@ class Engine:
         self.journal.event(self.now(), "start", f"mode={self.broker.mode} replay={self.replay} profile={os.environ.get('ANGELBOT_PROFILE', '')}")
         from bot import settings
         notify.send(messages.started(self.broker.mode, self.strategy_name, [i.symbol for i in self.instruments],
-                                     None if self.replay else settings.summary(), self.restored))
+                                     None if self.replay else settings.summary() + [f"⚠️ {x}" for x in settings.problems()],
+                                     self.restored))
         self.feed.start()
         ended = False
         try:

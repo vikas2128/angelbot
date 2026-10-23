@@ -47,6 +47,7 @@ HELP = (
     "/screen - stock screener: top picks plus the full ranking as a file (advisory only)\n"
     "/report - send the performance report as a file (optional: all|session|replay and a start date YYYY-MM-DD)\n"
     "/settings - change selection, shares, risk and exits (this area only)\n"
+    "/amount 7500 - rupees per trade; shares are worked out at each entry (/amount off to use share counts)\n"
     "/log - last 20 log lines\n"
     "/menu - show buttons\n"
     "/help - this list"
@@ -257,9 +258,12 @@ def settings_card(note: str = "") -> tuple[str, list[list[dict]]]:
     lines = [f"⚙️ <b>Settings</b> · {html.escape(area)}"]
     if note:
         lines += [note, ""]
+    lines += [f"⚠️ {html.escape(x)}" for x in ST.problems()]
+    by_amount = bool(ST.current(cfg, ST.BY_ID["amount"]))
     for s in ST.SETTINGS:
         mark = " ✏️" if s["path"] in vals else ""
-        lines.append(f"{html.escape(s['label'])}: <b>{html.escape(ST.show(s, ST.current(cfg, s)))}</b>{mark}")
+        unused = " <i>(not used: sized by amount)</i>" if by_amount and s["path"].endswith(".qty") else ""
+        lines.append(f"{html.escape(s['label'])}: <b>{html.escape(ST.show(s, ST.current(cfg, s)))}</b>{mark}{unused}")
     lines += ["", "✏️ changed here (wins over config.yaml). Tap a setting to change it. "
                   "Changes apply from the next start and are not backtested."]
     btns = [_btn(s["btn"], f"cfgk:{s['id']}") for s in ST.SETTINGS]
@@ -279,7 +283,9 @@ def settings_choices(sid: str) -> tuple[str, list[list[dict]]]:
     now = ST.current(ST.load(), s)
     btns = [_btn(("✓ " if c == now else "") + ST.show(s, c), f"cfgv:{sid}:{i}") for i, c in enumerate(s["choices"])]
     rows = [btns[i:i + 3] for i in range(0, len(btns), 3)] + [[_btn("« Back", "cfg")]]
-    return f"⚙️ <b>{html.escape(s['label'])}</b>\nNow: <b>{html.escape(ST.show(s, now))}</b>\nPick a value:", rows
+    hint = ("\nShares per order = as many as fit in this amount at each entry, so an order never costs more. "
+            "A stock whose one share costs more is skipped.\nOr type any amount: <code>/amount 7500</code>") if s.get("typed") else ""
+    return f"⚙️ <b>{html.escape(s['label'])}</b>\nNow: <b>{html.escape(ST.show(s, now))}</b>{hint}\nPick a value:", rows
 
 
 def settings_set(arg: str) -> tuple[str, list[list[dict]]]:
@@ -292,6 +298,18 @@ def settings_set(arg: str) -> tuple[str, list[list[dict]]]:
     if old == new:
         return settings_card(f"{html.escape(label)} is already <b>{html.escape(new)}</b>.")
     return settings_card(f"✅ Saved: {html.escape(label)} {html.escape(old)} → <b>{html.escape(new)}</b>. "
+                         "It applies from the next start.")
+
+
+def settings_amount(arg: str) -> tuple[str, list[list[dict]]]:
+    """/amount 7500 sets the rupees per trade; /amount 0 (or off) goes back to share counts."""
+    if not arg:
+        return settings_choices("amount")
+    try:
+        old, new = ST.apply_value("amount", "0" if arg.lower() == "off" else arg, now=now_ist())
+    except ValueError as e:
+        return settings_card(f"⚠️ {html.escape(str(e))}")
+    return settings_card(f"✅ Saved: Amount per trade {html.escape(old)} → <b>{html.escape(new)}</b>. "
                          "It applies from the next start.")
 
 
@@ -367,6 +385,8 @@ def route(text: str) -> tuple[str, list[list[dict]] | None]:
         return "🔎 Building the screener…", None
     if cmd == "/settings":
         return settings_card()
+    if cmd == "/amount":
+        return settings_amount(arg)
     if cmd == "/pause":
         control.set_control(paused=True, note="telegram pause")
         return "⏸ <b>Paused</b>: no new trades. Open positions keep their safety exit, goal and market-close exit.", main_menu()

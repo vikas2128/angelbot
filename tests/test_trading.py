@@ -249,3 +249,14 @@ def test_start_message_says_what_carried_over():
     from bot import messages as M
     text = M.started("paper", "ema_cross", ["SBIN-EQ"], None, {"trades": 3, "net": -12.5, "cooldown_until": t("10:30")})
     assert "Carried on from earlier today: 3 trade(s)" in text and "10:30" in text
+
+
+def test_restart_restore_copes_with_old_rows_without_a_timezone(cfg, inst, tmp_path, monkeypatch):
+    n = int(cfg["risk"]["max_consecutive_losses"])                        # enough losses to start a cooldown
+    j = _journal_with(tmp_path, [("paper", f"10:{i:02d}", -5.0, 1.0) for i in range(n)])
+    with j.lock:
+        j.conn.execute("UPDATE trades SET exit_ts = substr(exit_ts, 1, 19)")     # '2026-10-14T10:00:00', no +05:30
+        j.conn.commit()
+    eng = _restored(cfg, inst, j, monkeypatch, t("10:15"))              # still inside the cooldown
+    assert eng.risk.trades_today == n and eng.om.realized_net == pytest.approx(-6.0 * n)
+    assert eng.risk.cooldown_until is not None and eng.risk.cooldown_until.tzinfo is not None

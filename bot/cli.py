@@ -207,6 +207,10 @@ def cmd_backtest(args, cfg):
         bars = [b for b in bars if b.start.strftime("%Y-%m-%d") <= args.date_to]
     if args.timeframe:
         cfg["strategy"]["timeframe_min"] = args.timeframe
+    if args.amount is not None:                    # rupees per trade: shares worked out at each entry
+        cfg.setdefault("sizing", {})["amount"] = args.amount
+    elif args.qty is not None:                     # an explicit share count turns amount sizing off
+        cfg.setdefault("sizing", {})["amount"] = 0
     qty = args.qty
     if qty is None:
         try:
@@ -381,6 +385,7 @@ def main(argv=None):
     b.add_argument("--from", dest="date_from"); b.add_argument("--to", dest="date_to")
     b.add_argument("--strategy"); b.add_argument("--params", help="JSON dict of strategy params")
     b.add_argument("--timeframe", type=int); b.add_argument("--qty", type=int)
+    b.add_argument("--amount", type=float, help="rupees per trade; shares = what fits at each entry (overrides --qty)")
     b.add_argument("--csv", help="explicit candle CSV path"); b.add_argument("--master")
     b.add_argument("--daily", action="store_true", help="include per-day P&L")
 

@@ -101,9 +101,17 @@ def how_it_works(p: dict) -> list[str]:
     tot = sum(float(v) for v in w.values()) or 1.0
     share = lambda k: f"{float(w[k]) / tot * 100:.0f}%"
     qty, cap = int(p.get("qty") or 0), float(p.get("max_order_value") or 0)
-    size = f"{qty} share{'s' if qty != 1 else ''} per order, the bot's order size" if qty else \
-        f"an order of about ₹{float(p['order_value']):,.0f}"
-    cap_gate = f", {'the order' if qty else 'one order'} costing at most the ₹{cap:,.0f} order cap" if cap else ""
+    amt = float(p.get("amount") or 0)
+    if amt:
+        size = f"the shares that fit in your ₹{amt:,.0f} per trade"
+    elif qty:
+        size = f"{qty} share{'s' if qty != 1 else ''} per order, the bot's order size"
+    else:
+        size = f"an order of about ₹{float(p['order_value']):,.0f}"
+    if amt:
+        cap_gate = f", at least one share fitting in ₹{amt:,.0f}"
+    else:
+        cap_gate = f", {'the order' if qty else 'one order'} costing at most the ₹{cap:,.0f} order cap" if cap else ""
     return [
         f"A stock is only scored if it passes the gates: at least ₹{float(p['min_traded_value_cr']):.0f} crore traded "
         f"per day on average, a spread of at most {float(p['max_spread_pct']):.2f}% of the price, an average daily range "

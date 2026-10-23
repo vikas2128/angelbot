@@ -24,6 +24,7 @@ DEFAULTS = {
     "order_value": 40000,          # planned ₹ per order: fees as a share of the order depend on this
     "qty": 0,                      # fixed shares per order (the bot's real size); 0 = size by order_value
     "max_order_value": 0,          # gate: one order (qty x price) above this ₹ is refused by the bot; 0 = no gate
+    "amount": 0,                   # sizing.amount: ₹ per trade; > 0 sizes by it and leaves out a stock whose one share costs more
     "min_traded_value_cr": 100.0,  # gate: average daily traded value, ₹ crore
     "max_spread_pct": 0.10,        # gate: best bid-ask spread, % of price (only if the quote has depth)
     "min_range_to_cost": 5.0,      # gate: average daily range must be at least this many times round-trip costs
@@ -51,6 +52,9 @@ def params_from(cfg: dict | None) -> dict:
             p["qty"] = int(sel.get("qty") or 1)
     if (cfg.get("risk") or {}).get("max_order_value"):
         p["max_order_value"] = float(cfg["risk"]["max_order_value"])
+    amt = float((cfg.get("sizing") or {}).get("amount") or 0)
+    if amt > 0:                                    # the amount per trade wins over any share count
+        p.update(amount=amt, order_value=amt, qty=0)
     over = dict(cfg.get("screener") or {})
     w = over.pop("weights", None)
     p.update({k: v for k, v in over.items() if k in DEFAULTS and k != "weights"})
@@ -120,6 +124,10 @@ def gates(m: dict, p: dict) -> list[str]:
         return out
     if m["ltp"] is None:
         out.append("no price")
+    amt = float(p.get("amount") or 0)
+    if amt > 0 and m["ltp"] and m["ltp"] > amt:
+        out.append(f"one share costs ₹{m['ltp']:,.0f}, more than your ₹{amt:,.0f} per trade")
+        return out
     cap = float(p.get("max_order_value") or 0)
     if cap > 0 and m.get("order_value") and m["order_value"] > cap:
         n = m["suggested_qty"]

@@ -42,6 +42,12 @@ selection:
   on_failure: config
   qty: 5                    # shares per order for the picked stock
 
+# Position size from rupees. 0 = off: use the share counts above. > 0: at each entry the bot buys as many whole shares
+# as fit in this amount (never more), and skips a stock whose one share costs more. Must be <= risk.max_order_value.
+# Also settable from Telegram: /amount 7500 or ⚙️ Settings → ₹ per trade.
+sizing:
+  amount: 0
+
 strategy:
   name: ema_cross          # ema_cross | orb | vwap_revert
   timeframe_min: 1          # bar size in minutes

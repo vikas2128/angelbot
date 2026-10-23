@@ -52,11 +52,15 @@ class OrderManager:
             return round_to_tick(ltp * (1 + buffer_pct / 100), inst.tick_size, "up")
         return round_to_tick(ltp * (1 - buffer_pct / 100), inst.tick_size, "down")
 
-    def enter(self, symbol: str, direction: int, ltp: float, now: datetime, reason: str) -> str | None:
+    def entry_price(self, symbol: str, direction: int, ltp: float) -> float:
+        return self._limit_price(self.inst[symbol], "BUY" if direction > 0 else "SELL", ltp, float(self.x["entry_buffer_pct"]))
+
+    def enter(self, symbol: str, direction: int, ltp: float, now: datetime, reason: str,
+              qty: int | None = None) -> str | None:
         inst = self.inst[symbol]
         side = "BUY" if direction > 0 else "SELL"
-        price = self._limit_price(inst, side, ltp, float(self.x["entry_buffer_pct"]))
-        return self._place(inst, side, inst.order_qty, price, "ENTRY", now, reason)
+        price = self.entry_price(symbol, direction, ltp)
+        return self._place(inst, side, qty or inst.order_qty, price, "ENTRY", now, reason)
 
     def exit(self, symbol: str, ltp: float, now: datetime, reason: str) -> str | None:
         pos = self.positions[symbol]

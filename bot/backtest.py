@@ -14,6 +14,7 @@ from pathlib import Path
 
 from bot.charges import order_charges
 from bot.data import resample, split_days
+from bot import sizing
 from bot.models import Bar
 from bot.strategies import build
 from bot.timeutil import at
@@ -46,6 +47,7 @@ def run_backtest(cfg: dict, bars_1m: list[Bar], qty: int = 1, strategy: str | No
     sl_pct, tgt_pct = float(ex["stop_loss_pct"]) / 100, float(ex.get("target_pct") or 0) / 100
     trail = float(ex.get("trailing_sl_pct") or 0) / 100
     charges_cfg = cfg.get("charges", {})
+    amount = sizing.amount(cfg)         # > 0: shares at each entry = what fits in this many rupees
 
     trades: list[BTTrade] = []
     equity, peak, max_dd = 0.0, 0.0, 0.0
@@ -55,13 +57,14 @@ def run_backtest(cfg: dict, bars_1m: list[Bar], qty: int = 1, strategy: str | No
         strat = build(name, p)
         strat.reset_day()
         pos, entry_px, entry_ts, stop, target, best = 0, 0.0, None, None, None, None
+        pos_qty = qty
         pending: int | None = None          # desired side to execute at next open
         trades_today, day_pnl, consec, cooldown_until, halted = 0, 0.0, 0, None, False
         seen: list[Bar] = []
 
         def close(bar_ts: datetime, px: float, reason: str):
-            nonlocal pos, day_pnl, equity, peak, max_dd, consec, cooldown_until, halted
-            q = qty
+            nonlocal pos, pos_qty, day_pnl, equity, peak, max_dd, consec, cooldown_until, halted
+            q = pos_qty
             gross = (px - entry_px) * q * (1 if pos > 0 else -1)
             ch = order_charges("BUY" if pos > 0 else "SELL", q, entry_px, charges_cfg) + \
                  order_charges("SELL" if pos > 0 else "BUY", q, px, charges_cfg)
@@ -89,13 +92,15 @@ def run_backtest(cfg: dict, bars_1m: list[Bar], qty: int = 1, strategy: str | No
                 desired, pending = pending, None
                 if pos != 0 and desired != pos:
                     close(bar.start, bar.open * (1 - slip if pos > 0 else 1 + slip), "signal")
-                can_enter = (desired != 0 and pos == 0 and not halted
+                fill_px = bar.open * (1 + slip if desired > 0 else 1 - slip)
+                eq = sizing.qty_for(amount, max(bar.open, fill_px)) if amount else qty
+                can_enter = (desired != 0 and pos == 0 and not halted and eq > 0
                              and at(bar.start, ss["entry_start"]) <= bar.start < at(bar.start, ss["entry_cutoff"])
                              and trades_today < int(rk["max_trades_per_day"])
                              and not (cooldown_until and bar.start < cooldown_until)
-                             and bar.open * qty <= float(rk["max_order_value"]))
+                             and bar.open * eq <= float(rk["max_order_value"]))
                 if can_enter:
-                    pos = desired
+                    pos, pos_qty = desired, eq
                     entry_px = bar.open * (1 + slip if pos > 0 else 1 - slip)
                     entry_ts = bar.start
                     stop = entry_px * (1 - sl_pct) if pos > 0 else entry_px * (1 + sl_pct)
@@ -141,7 +146,7 @@ def run_backtest(cfg: dict, bars_1m: list[Bar], qty: int = 1, strategy: str | No
     losses = [t for t in trades if t.net <= 0]
     gross_win, gross_loss = sum(t.net for t in wins), -sum(t.net for t in losses)
     summary = {
-        "strategy": name, "params": p, "timeframe_min": tf, "qty": qty,
+        "strategy": name, "params": p, "timeframe_min": tf, "qty": qty, "amount_per_trade": amount or None,
         "days": len(daily), "trades": len(trades),
         "win_rate_pct": round(100 * len(wins) / len(trades), 1) if trades else 0.0,
         "net_pnl": round(sum(t.net for t in trades), 2),
