@@ -108,18 +108,26 @@ def split_walk_forward(bars: list) -> tuple[list, list]:
     return [b for b in bars if b.start.strftime("%Y-%m-%d") < cut], [b for b in bars if b.start.strftime("%Y-%m-%d") >= cut]
 
 
+def min_trades(name: str) -> tuple[int, int]:
+    """(older days, newer days) trades a strategy needs in the walk-forward check: its own numbers if it sets them
+    (the opening range can trade only about once a day), else WF_MIN_TRAIN_TRADES / WF_MIN_TEST_TRADES."""
+    from bot.strategies import STRATEGIES
+    cls = STRATEGIES.get(name)
+    return tuple(getattr(cls, "wf_min_trades", None) or (WF_MIN_TRAIN_TRADES, WF_MIN_TEST_TRADES))
+
+
 def choose(walk: dict) -> dict:
     """This stock's strategy: the best net after fees on the OLDER days, kept only if it also made money on the NEWER
     days it was not chosen on, with enough trades on both. Otherwise none (the stock is left out)."""
     ok = {n: w for n, w in walk.items()
-          if int(w["train"]["trades"] or 0) >= WF_MIN_TRAIN_TRADES and float(w["train"]["net_pnl"] or 0) > 0}
+          if int(w["train"]["trades"] or 0) >= min_trades(n)[0] and float(w["train"]["net_pnl"] or 0) > 0}
     if not walk:
         return {"strategy": None, "why": "not enough days of candles to check"}
     if not ok:
         return {"strategy": None, "why": "no strategy made money (with enough trades) on the older days"}
     best = max(ok, key=lambda n: float(ok[n]["train"]["net_pnl"]))
     t = ok[best]["test"]
-    if int(t["trades"] or 0) < WF_MIN_TEST_TRADES:
+    if int(t["trades"] or 0) < min_trades(best)[1]:
         return {"strategy": None, "why": f"{best} was best on the older days but traded only {t['trades']} times on the newer days"}
     if float(t["net_pnl"] or 0) <= 0:
         return {"strategy": None, "why": f"{best} was best on the older days but lost ₹{-float(t['net_pnl']):,.2f} on the newer days"}

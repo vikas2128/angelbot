@@ -310,6 +310,38 @@ def cmd_api(args, cfg):
     api_server.main(argv)
 
 
+def cmd_wf_grid(args, cfg):
+    """Research: walk-forward test of a grid of settings on the saved candles (no broker, no config change)."""
+    import json
+    from bot import data as D, screener, wf_grid as G
+    from bot import universe as U
+
+    _no_area_guard("wf-grid")
+    entries = [x.strip() for x in args.universe.split(",") if x.strip()] if args.universe else \
+        list((cfg.get("screener") or {}).get("universe") or screener.DEFAULT_UNIVERSE)
+    symbols, notes = U.expand(entries)
+    bars = {}
+    for sym in symbols:
+        path = D.csv_path(sym)
+        if path.exists():
+            bars[sym] = D.to_bars(D.load_csv(path))
+        else:
+            notes.append(f"{sym}: no saved candles (run backtest-stocks first)")
+    grid = G.combos(strategies=tuple(args.strategies.split(",")) if args.strategies else G.STRATEGY_NAMES)
+    print(f"{len(bars)} stocks x {len(grid)} settings, {args.jobs or os.cpu_count()} processes; "
+          "this takes several minutes and uses the CPU (run it after the close)...", flush=True)
+    rep = G.run(cfg, bars, grid, jobs=args.jobs,
+                progress=lambda i, n, sym: print(f"  [{i}/{n}] {sym}", flush=True))
+    rep["skipped"] = notes + rep["skipped"]
+    out = C.RUNTIME_DIR / "research" / f"wf_grid_{now_ist().strftime('%Y%m%d_%H%M')}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(rep, indent=1, default=str))
+    print()
+    print(G.report_text(rep, top=args.top))
+    print(f"\nfull results -> {out}")
+    return 0
+
+
 def cmd_backtest_stocks(args, cfg):
     """Backtest every stock the screener looks at, for tomorrow's backtest check (read-only market data)."""
     from bot import screener, stock_backtest as SB
@@ -498,6 +530,12 @@ def main(argv=None):
     api.add_argument("--cert"); api.add_argument("--key"); api.add_argument("--dev", action="store_true")
     api.add_argument("--name", help="the VM's Tailscale HTTPS name (.ts.net)")
 
+    wg = sub.add_parser("wf-grid", help="research: walk-forward test of settings on the saved candles")
+    wg.add_argument("--universe", help="comma-separated presets or symbols (default: the screener's universe)")
+    wg.add_argument("--strategies", help="comma-separated (default: all three)")
+    wg.add_argument("--jobs", type=int, help="processes (default: all CPUs)")
+    wg.add_argument("--top", type=int, default=12, help="settings to list (default 12)")
+
     bs = sub.add_parser("backtest-stocks")
     bs.add_argument("--universe", help="comma-separated presets or symbols (default: the screener's universe)")
     bs.add_argument("--days", type=int, default=30, help="days of 1-minute candles (default 30)")
@@ -520,7 +558,7 @@ def main(argv=None):
     cfg = settings.load(Path(args.config) if args.config else None)     # config.yaml + this area's Telegram settings
     handlers = {"check": cmd_check, "run": cmd_run, "fetch": cmd_fetch, "backtest": cmd_backtest,
                 "instruments": cmd_instruments, "sample-data": cmd_sample, "screen": cmd_screen, "universe": cmd_universe,
-                "backtest-stocks": cmd_backtest_stocks, "api": cmd_api, "app": cmd_app,
+                "backtest-stocks": cmd_backtest_stocks, "wf-grid": cmd_wf_grid, "api": cmd_api, "app": cmd_app,
                 "telegram-test": cmd_telegram_test}
     rc = handlers.get(args.cmd, cmd_control)(args, cfg)
     sys.exit(rc or 0)

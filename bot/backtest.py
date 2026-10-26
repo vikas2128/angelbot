@@ -154,6 +154,8 @@ def run_backtest(cfg: dict, bars_1m: list[Bar], qty: int = 1, strategy: str | No
         "charges": round(sum(t.charges for t in trades), 2),
         "avg_trade": round(sum(t.net for t in trades) / len(trades), 2) if trades else 0.0,
         "profit_factor": round(gross_win / gross_loss, 2) if gross_loss else None,
+        "net_won": round(gross_win, 2), "net_lost": round(gross_loss, 2),     # so results can be pooled across runs
+        "wins": len(wins),
         "max_drawdown": round(max_dd, 2),
         "green_days": sum(1 for v in daily.values() if v > 0),
         "red_days": sum(1 for v in daily.values() if v < 0),

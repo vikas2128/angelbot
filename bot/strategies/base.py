@@ -17,6 +17,9 @@ class Strategy:
     name = "base"
     defaults: dict = {}
     warmup_bars = 0   # bars of history wanted before signals are meaningful
+    # walk-forward check (bot.stock_backtest.choose): trades needed on the older days to choose on, and on the newer
+    # days to confirm. A strategy that can only trade about once a day sets lower numbers (weaker evidence).
+    wf_min_trades = (12, 5)
 
     def __init__(self, params: Optional[dict] = None):
         self.p = {**self.defaults, **(params or {})}

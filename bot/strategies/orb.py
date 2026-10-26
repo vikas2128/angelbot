@@ -17,6 +17,8 @@ class OpeningRangeBreakout(Strategy):
 
     name = "orb"
     defaults = {"range_minutes": 15, "buffer_pct": 0.05}
+    # at most one breakout per side a day (one a day when long-only): 12 trades on ~15 older days is out of reach
+    wf_min_trades = (6, 3)
 
     def reset_day(self) -> None:
         self.fired: set[int] = set()
