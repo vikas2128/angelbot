@@ -311,7 +311,9 @@ selection is on (§6), the bot still trades only the instruments in the config.
 
 Run it **before 09:00 or after about 15:32**, when that area's bot is not running. The screener logs in to SmartAPI on
 its own, and a second login beside a running bot has not been tested, so it refuses while the bot is alive unless you
-add `--force`. It paces calls at one a second: the Nifty 50 + Bank Nifty lists (about 59 stocks) take about a minute.
+add `--force`. Daily history comes from the 1-minute candles the nightly per-stock job (15:45) saved in `data/candles`, so a
+screen after a normal evening run needs only the quote call and takes seconds. A stock without last night's candles
+is fetched from SmartAPI at one a second (the history API is heavily rate-limited around the open).
 
 **Paper**
 ```bash

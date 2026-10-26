@@ -25,7 +25,7 @@ HELP = {
     "listqty": "Fixed shares for the stocks in your config list (only when the amount per trade is off).",
     "topn": "How many of the screen's top stocks to trade each day.",
     "univ": "The pool the morning screen ranks. More stocks means more chances that some pass the checks; "
-            "the screen takes about a second per stock.",
+            "the screen reads last night's saved candles, so it stays quick.",
     "perstock": "On: each night every strategy is tested on each stock. A stock trades the strategy that made money "
                 "on the older days and again on the newer days; a stock where none does is skipped.",
     "btgate": "Skip stocks whose recent backtest with your strategy lost money after fees.",

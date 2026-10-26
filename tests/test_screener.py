@@ -326,3 +326,43 @@ def test_a_day_with_nothing_passed_explains_why_and_opens_on_left_out():
     assert reason_group("one share costs ₹12,000, more than your ₹10,000 per trade") == "One share costs more than the amount"
     assert why_left_out([{"excluded": ["backtest lost ₹5.00 after fees"]}, {"excluded": ["only 3 days of history (need 10)"]},
                          {"excluded": ["backtest made only 2 trades"]}]) == [("Backtest check failed", 2), ("Too little history", 1)]
+
+
+# ---------------------------------------------------------------- daily history from the nightly job's saved candles
+def _minute_rows(days, last="15:29", partial_day=None):
+    rows = []
+    for d in days:
+        end = "11:00" if d == partial_day else last
+        for hm, o, h, l, c in (("09:15", 100, 101, 99, 100.5), ("12:00", 100.5, 104, 100, 103), (end, 103, 103.5, 98, 99)):
+            rows.append([f"{d}T{hm}:00+05:30", o, h, l, c, 1000])
+    return rows
+
+
+def _save(tmp_path, monkeypatch, symbol, rows):
+    from bot import data as D
+    monkeypatch.setattr(D, "DATA_DIR", tmp_path)
+    D.save_csv(rows, D.csv_path(symbol))
+
+
+def test_daily_history_comes_from_saved_candles_without_a_history_call(tmp_path, monkeypatch):
+    days = [f"2026-10-{d:02d}" for d in (12, 13, 14, 15, 16, 19, 21)] + ["2026-10-22"]   # the 22nd is today: left out
+    for sym in ("AAA-EQ", "BBB-EQ"):
+        _save(tmp_path, monkeypatch, sym, _minute_rows(days))
+    broker = FakeBroker(QUOTE, fail=["AAA-EQ", "BBB-EQ"])                    # any history call would fail
+    raws, errs = collect(broker, INSTS, NOW, pause=0, holidays=["2026-10-20"])
+    assert not any("no daily candles" in e for e in errs) and len(raws) == 2
+    d = raws[0]["daily"]
+    assert [x["d"] for x in d][-2:] == ["2026-10-19", "2026-10-21"] and len(d) == 7
+    assert d[-1] == {"d": "2026-10-21", "o": 100, "h": 104, "l": 98, "c": 99, "v": 3000}   # first open, last close, sums
+
+
+def test_stale_or_partial_saved_candles_fall_back_to_the_broker(tmp_path, monkeypatch):
+    from bot.screen_data import daily_from_cache, last_trading_day
+    assert last_trading_day(NOW) == "2026-10-21" and last_trading_day(NOW.replace(day=26)) == "2026-10-23"   # Monday → Friday
+    _save(tmp_path, monkeypatch, "AAA-EQ", _minute_rows(["2026-10-15", "2026-10-16"]))               # last night's run missing
+    _save(tmp_path, monkeypatch, "BBB-EQ", _minute_rows(["2026-10-16", "2026-10-21"], partial_day="2026-10-21"))
+    assert daily_from_cache("AAA-EQ", "2026-10-22", "2026-10-21") is None
+    assert daily_from_cache("BBB-EQ", "2026-10-22", "2026-10-21") is None    # the 21st stops at 11:00: not a full day
+    assert daily_from_cache("NOPE-EQ", "2026-10-22", "2026-10-21") is None
+    raws, errs = collect(FakeBroker(QUOTE), INSTS, NOW, pause=0)
+    assert raws[0]["daily"][-1]["d"] == "2026-10-21" and len(raws[0]["daily"]) == 21           # the broker's 21 days

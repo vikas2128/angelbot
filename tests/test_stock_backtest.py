@@ -105,7 +105,7 @@ def test_run_screen_attaches_results_and_fails_closed_without_them(cfg, monkeypa
     from bot.instruments import load_master
     cfg = copy.deepcopy(cfg)
     cfg["screener"] = {"backtest_gate": True}
-    monkeypatch.setattr(screen_data, "collect", lambda broker, insts, now, lb, pause=1.0, progress=None:
+    monkeypatch.setattr(screen_data, "collect", lambda broker, insts, now, lb, pause=1.0, progress=None, holidays=None:
                         ([raw(i.symbol) for i in insts], []))
     master = load_master(FIXTURE_MASTER)
     snap = screen_data.run_screen(cfg, None, master, NOW, ["SBIN-EQ", "INFY-EQ"])
@@ -182,7 +182,7 @@ def test_comparison_is_shown_and_never_changes_the_picks(cfg, monkeypatch):
     from bot.instruments import load_master
     cfg = copy.deepcopy(cfg)
     cfg["screener"] = {"backtest_gate": False}
-    monkeypatch.setattr(screen_data, "collect", lambda broker, insts, now, lb, pause=1.0, progress=None:
+    monkeypatch.setattr(screen_data, "collect", lambda broker, insts, now, lb, pause=1.0, progress=None, holidays=None:
                         ([raw(i.symbol) for i in insts], []))
     master = load_master(FIXTURE_MASTER)
     before = screen_data.run_screen(cfg, None, master, NOW, ["SBIN-EQ", "INFY-EQ"])
