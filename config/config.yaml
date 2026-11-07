@@ -60,7 +60,7 @@ sizing:
 
 strategy:
   name: ema_cross          # ema_cross | orb | vwap_revert
-  timeframe_min: 1          # bar size in minutes
+  timeframe_min: 5          # bar size in minutes (1-min churned: 80 trades/8 sessions, fees 5.6x the gross loss; agent 2026-11-07-P1)
   allow_short: false        # intraday shorts on equity (true) or long-only (false)
   params:
     ema_cross:

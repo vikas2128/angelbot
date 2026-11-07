@@ -32,6 +32,7 @@ def cfg():
     # trading tests stay independent of what config.yaml happens to set today: one position, fixed shares
     c["risk"]["max_open_positions"] = 1
     c["sizing"] = {"amount": 0}
+    c["strategy"]["timeframe_min"] = 1       # the trading tests feed 1-minute bars
     return c
 
 

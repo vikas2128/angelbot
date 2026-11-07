@@ -38,7 +38,7 @@ def test_cfg_for_sets_bars_size_exits_and_scales_the_daily_loss_limit():
     assert cfg["strategy"]["timeframe_min"] == 15 and cfg["sizing"]["amount"] == 50000
     assert (cfg["exits"]["stop_loss_pct"], cfg["exits"]["target_pct"]) == (1.0, 2.0)
     assert cfg["risk"]["max_daily_loss"] == 2500 and base["risk"]["max_daily_loss"] == 500
-    assert base["strategy"].get("timeframe_min") == 1                                  # the base is not changed
+    assert base["strategy"].get("timeframe_min") != 15                                 # the base is not changed
 
 
 def test_run_reports_by_setting_and_per_stock_on_the_newer_days_only():
